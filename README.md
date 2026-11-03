@@ -14,6 +14,8 @@ Everything will be in 2D, though a 3D implementation might be done depending of 
 The begining of this project will be consacrated to learning OpenGL following the link : https://learnopengl.com/Introduction.
 
 For the moment the arborescence is like this : 
+
+
 simlab/
 ├── CMakeLists.txt            It will describe how to compile the project, I will ugprade it following how I advance.
 ├── CONVENTIONS.md            All the conventions I will eb using in this project.
