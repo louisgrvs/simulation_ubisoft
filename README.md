@@ -16,22 +16,24 @@ The begining of this project will be consacrated to learning OpenGL following th
 For the moment the arborescence is like this : 
 
 
+```text
 simlab/
-├── CMakeLists.txt            It will describe how to compile the project, I will ugprade it following how I advance.
-├── CONVENTIONS.md            All the conventions I will eb using in this project.
+├── CMakeLists.txt        How to build the project; updated as the project grows
+├── CONVENTIONS.md        All the conventions used in this project
 ├── src/
-│   ├── core/                 Every elementary mathematics tools that I would need for the project.
-│   ├── grid/                 Grid data : Field2D, MacGrid2D, NodalGrid2D
-│   ├── particles/            particle storage : positions, speeds etc ... ParticleSet2D
-│   ├── numerics/             numercis algrotihm re-usable : advection, conjuguated gradient , Poisson MAC...
-│   ├── geometry/             obstacles and collisions : 
-|   ├── materials/            physics proper to each materials describe and the laws that implemented it
-│   ├── solvers/              Time loop to obtain our simulation : StableFluids, Flip, Mpm (all ISolver2D)
-│   ├── scenes/               All of our initial conditions for our experiments
-│   ├── diagnostics/          All of our validations things
-│   ├── render/               The only folder that uses OpenGL : it is where our graphics works.
-│   ├── gpu/                  If we have time : the GPU implementation
-│   └── app/main.cpp          Everything in one : the maestro !
-├── shaders/                  GLSL's programs *.vert, *.frag, *.comp
-├── tests/                    doctest : mini-tests to check we're doing allright !
-└── tools/                    scripts Python to draw our results.
+│   ├── core/             Elementary math tools needed throughout the project
+│   ├── grid/             Grid data: Field2D, MacGrid2D, NodalGrid2D
+│   ├── particles/        Particle storage (positions, velocities…): ParticleSet2D
+│   ├── numerics/         Reusable numerical algorithms: advection, conjugate gradient, MAC Poisson…
+│   ├── geometry/         Obstacles and collisions
+│   ├── materials/        Physics specific to each material and its constitutive laws
+│   ├── solvers/          Time loops producing the simulations: StableFluids, Flip, Mpm (all ISolver2D)
+│   ├── scenes/           Initial conditions for the experiments
+│   ├── diagnostics/      Validation quantities, exported to CSV
+│   ├── render/           The only folder that uses OpenGL: all the graphics work
+│   ├── gpu/              GPU implementation, if time allows
+│   └── app/main.cpp      Everything in one place: the maestro!
+├── shaders/              GLSL programs: *.vert, *.frag, *.comp
+├── tests/                doctest unit tests: mini-checks that everything works
+└── tools/                Python scripts to plot the results
+```
