@@ -66,3 +66,18 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Compilation CMake
+build/
+out/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+
+# Éditeurs
+.vs/
+.vscode/
+
+# Sorties des simulations
+resultats/
+*.mp4
