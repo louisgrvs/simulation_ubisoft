@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="simulation_fluides/simulation_fluides.vcxproj" Id="71733ff6-b109-4849-aa74-6c9c125bb591" />
+</Solution>
