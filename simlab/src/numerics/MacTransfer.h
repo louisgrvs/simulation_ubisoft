@@ -39,8 +39,8 @@
 // Les indices peuvent sortir du champ : tester avec inField().
 struct Stencil2D {
     int  i0 = 0, j0 = 0;
-    real wx[2] = {0, 0};
-    real wy[2] = {0, 0};
+    real wx[2] = { 0, 0 };
+    real wy[2] = { 0, 0 };
 };
 
 Stencil2D linearStencil(const Field2D& f, Vec2 x); // Coordonnées indice réelles de x dans ce champ (le décalage n'intervient qu'ici).
@@ -66,3 +66,22 @@ Vec2 interpolateMac(const MacGrid2D& grid, Vec2 x);
 
 // G2P, schéma PIC : u_p <- \sum_f w_f(x_p) u_f.
 void macToParticlesPIC(const MacGrid2D& grid, ParticleSet2D& particles);
+
+// ----------------------------------------------------------------------------
+//  J9 : G2P, schéma FLIP et mélange PIC/FLIP (Zhu & Bridson #4.2.4)
+// ----------------------------------------------------------------------------
+//  PIC remplace la vitesse de la particule par celle de la grille :
+//      u_p^PIC  = \sum_f w_f(x_p) u_f^new
+//  FLIP n'interpole que la VARIATION de la grille pendant le pas (forces + projection) :
+//      u_p^FLIP = u_p + \sum_f w_f(x_p) (u_f^new - u_f^old)
+//  Mélange réglable, alpha = flipRatio \in [0, 1] :
+//      u_p <- alpha u_p^FLIP + (1 - alpha) u_p^PIC
+//  alpha = 0 : PIC exactement (dissipatif, lisse) ; alpha = 1 : FLIP pur (peu
+//  dissipatif, mais bruité : rien ne rappelle les écarts entre particules d'une
+//  même cellule, que la grille ne voit pas).
+//
+//  uOld, vOld : vitesse de grille juste après P2G (et l'extrapolation n°1),
+//  AVANT les forces. Mêmes dispositions que grid.u et grid.v.
+//  Mêmes poids (linearStencil) que P2G et PIC, même traitement des parois.
+void macToParticlesFLIP(const MacGrid2D& grid, const Field2D& uOld, const Field2D& vOld,
+    ParticleSet2D& particles, real flipRatio);

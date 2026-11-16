@@ -1,6 +1,7 @@
 #pragma once
 #include "grid/MacGrid2D.h"
 #include "numerics/ConjugateGradient.h"
+#include "grid/CellLabels.h"
 
 // ============================================================================
 //  Projection de Helmholtz-Hodge discrète (Stam, éq. 3-5 ; Zhu-Bridson #4.2.3)
@@ -34,3 +35,6 @@ struct ProjectionStats {
 
 ProjectionStats project(MacGrid2D& g, real dt, const ProjectionOptions& opt = {},
                         Vector* residualHistory = nullptr);
+
+ProjectionStats project(MacGrid2D& g, const CellLabels& L, real dt,
+    const ProjectionOptions& opt = {}, Vector* residualHistory = nullptr);

@@ -9,7 +9,7 @@ Field2D::Field2D(int nx, int ny, real h, real ox, real oy, real init)
 }
 
 real Field2D::sample(Vec2 x) const {
-    // 1) Coordonnées physiques -> coordonnées « indice » (réelles) de CE champ.
+    // 1) Coordonnées physiques -> coordonnées "indice"(réelles) de ce champ.
     //    C'est ici, et seulement ici, que le décalage (ox, oy) intervient.
     real gx = x.x / h_ - ox_;
     real gy = x.y / h_ - oy_;

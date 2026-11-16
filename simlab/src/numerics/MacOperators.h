@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include "grid/MacGrid2D.h"
+#include "grid/CellLabels.h"
 
 // ============================================================================
 //  Opérateurs discrets sur la grille MAC (domaine fermé par 4 parois)
@@ -51,3 +52,22 @@ struct NegLaplacianMAC {
     real h;
     void operator()(const std::vector<real>& x, std::vector<real>& y) const;
 };
+
+
+void subtractGradientFS(MacGrid2D& g, const Field2D& q, const CellLabels& L);
+
+// Laplacien négatif avec surface libre (Zhu-Bridson §4.2.3), seulement dans les cellules Fluid :
+//   (A x)_ij = ( N_ij x_ij - sum_{voisins Fluid} x_voisin ) / h^2,
+//   N_ij = nombre de voisins non Solid (un voisin Air compte dans N : q = 0, Dirichlet).
+// Hors des cellules Fluid : ligne identité (q y reste 0).
+struct NegLaplacianFS {
+    int nx, ny;
+    real h;
+    const CellLabels* L;
+    void operator()(const std::vector<real>& x, std::vector<real>& y) const;
+};
+
+// max |div| sur les cellules Fluid seulement (dans l'air, la divergence ne veut rien dire).
+real maxAbsDivergence(const MacGrid2D& g, const CellLabels& L);
+
+void subtractGradientFS(MacGrid2D& g, const Field2D& q, const CellLabels& L);

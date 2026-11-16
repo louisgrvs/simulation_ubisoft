@@ -1,5 +1,5 @@
 // ============================================================================
-//  simlab_particles : particules PIC interactives (jour 7)
+//  simlab_particles : particules PIC / FLIP interactives (jours 7 à 9)
 // ============================================================================
 //  Même organisation que l'application de fumée (main.cpp, jour 5) :
 //    1. événements (clavier, souris -> pinceau en coordonnées physiques) ;
@@ -11,13 +11,17 @@
 //    Boite pleine - tourbillon : le tourbillon cellulaire du jour 5, porté par
 //                                des particules ; comparer sa décroissance à Stam ;
 //    Boite pleine - repos      : à remuer avec la souris (clic gauche) ;
-//    Disque en rotation        : transferts PIC SEULS, particules immobiles.
+//    Disque en rotation        : transferts SEULS, particules immobiles.
 //                                Avec l'échelle de couleur fixe, on voit la
-//                                vitesse s'éteindre, d'abord au bord du disque.
-//  Clavier : Espace = pause, N ou flèche droite = un pas, R = réinitialiser.
+//                                vitesse s'éteindre avec PIC, pas avec FLIP pur ;
+//    Cuve au repos (J8)        : surface libre et gravité, doit rester immobile ;
+//    Rupture de barrage (J9)   : colonne d'eau lâchée contre la paroi gauche.
 //
-//  Les deux applications seront réunies quand FlipSolver aura son mode FLIP
-//  (jour 9) ; d'ici là, chacune garde son panneau.
+//  Transfert (J9) : PIC, ou mélange FLIP/PIC réglé par alpha. Le schéma et alpha
+//  s'appliquent à chaud, sans réinitialiser : on peut changer en pleine chute.
+//  Courbes : énergie totale E_c + E_p (ne doit jamais monter) et bruit relatif
+//  (variance des vitesses dans chaque cellule, divisée par <|u|²>).
+//  Clavier : Espace = pause, N ou flèche droite = un pas, R = réinitialiser.
 // ============================================================================
 #include <glad/glad.h>   // toujours AVANT GLFW
 #include <GLFW/glfw3.h>
@@ -44,41 +48,41 @@
 
 namespace {
 
-void glfwErrorCallback(int code, const char* message) {
-    std::fprintf(stderr, "GLFW %d : %s\n", code, message);
-}
-
-void APIENTRY glDebugCallback(GLenum, GLenum type, GLuint, GLenum severity, GLsizei,
-                              const GLchar* message, const void*) {
-    if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
-    std::fprintf(stderr, "[GL %s] %s\n", type == GL_DEBUG_TYPE_ERROR ? "ERREUR" : "info", message);
-}
-
-bool sliderReal(const char* label, real& value, float vmin, float vmax, const char* fmt,
-                ImGuiSliderFlags flags = 0) {
-    float f = float(value);
-    if (ImGui::SliderFloat(label, &f, vmin, vmax, fmt, flags)) {
-        value = real(f);
-        return true;
+    void glfwErrorCallback(int code, const char* message) {
+        std::fprintf(stderr, "GLFW %d : %s\n", code, message);
     }
-    return false;
-}
 
-// Plus grand rectangle aux proportions du domaine, centré dans la zone
-// (même calcul que FieldRenderer::draw, pour que champ et particules coïncident).
-FieldRenderer::Rect fitRect(FieldRenderer::Rect area, Vec2 domain) {
-    FieldRenderer::Rect r;
-    const float aspect = float(domain.x / domain.y);
-    r.w = area.w;
-    r.h = int(float(area.w) / aspect);
-    if (r.h > area.h) {
-        r.h = area.h;
-        r.w = int(float(area.h) * aspect);
+    void APIENTRY glDebugCallback(GLenum, GLenum type, GLuint, GLenum severity, GLsizei,
+        const GLchar* message, const void*) {
+        if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
+        std::fprintf(stderr, "[GL %s] %s\n", type == GL_DEBUG_TYPE_ERROR ? "ERREUR" : "info", message);
     }
-    r.x = area.x + (area.w - r.w) / 2;
-    r.y = area.y + (area.h - r.h) / 2;
-    return r;
-}
+
+    bool sliderReal(const char* label, real& value, float vmin, float vmax, const char* fmt,
+        ImGuiSliderFlags flags = 0) {
+        float f = float(value);
+        if (ImGui::SliderFloat(label, &f, vmin, vmax, fmt, flags)) {
+            value = real(f);
+            return true;
+        }
+        return false;
+    }
+
+    // Plus grand rectangle aux proportions du domaine, centré dans la zone
+    // (même calcul que FieldRenderer::draw, pour que champ et particules coïncident).
+    FieldRenderer::Rect fitRect(FieldRenderer::Rect area, Vec2 domain) {
+        FieldRenderer::Rect r;
+        const float aspect = float(domain.x / domain.y);
+        r.w = area.w;
+        r.h = int(float(area.w) / aspect);
+        if (r.h > area.h) {
+            r.h = area.h;
+            r.w = int(float(area.h) * aspect);
+        }
+        r.x = area.x + (area.w - r.w) / 2;
+        r.y = area.y + (area.h - r.h) / 2;
+        return r;
+    }
 
 } // namespace
 
@@ -91,7 +95,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC (jour 7)", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP (jour 9)", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "Echec de la creation de la fenetre (OpenGL 4.3 indisponible ?)\n");
         glfwTerminate();
@@ -132,11 +136,13 @@ int main() {
         bool colorBySpeed = true, fixedScale = true;
         float pointScale = 1.0f;
         float speedScale = 1.0f;                     // haut de l'échelle de couleur (m/s)
-        const int gridSizes[] = {32, 48, 64, 96, 128};
+        const int gridSizes[] = { 32, 48, 64, 96, 128 };
         int gridChoice = 2;
         int ppcChoice = 1;                           // 0 : 1, 1 : 4, 2 : 9 particules par cellule
         int seed = int(solver.params().seed);
         std::vector<float> energyPlot, angularPlot, speeds;
+        std::vector<float> volumePlot, maxSpeedPlot;   // J8 : cuve au repos
+        std::vector<float> noisePlot;                  // J9 : bruit relatif
         const size_t plotLength = 600;
 
         FieldRenderer::Rect domainRect;
@@ -149,9 +155,12 @@ int main() {
             solver.reset();
             energyPlot.clear();
             angularPlot.clear();
+            volumePlot.clear();
+            maxSpeedPlot.clear();
+            noisePlot.clear();   // J9
             const real vmax = particleMaxSpeed(solver.particles());
             speedScale = vmax > 0 ? float(vmax) : 1.0f;
-        };
+            };
         resetAll();
 
         while (!glfwWindowShouldClose(window)) {
@@ -184,9 +193,9 @@ int main() {
             FlipBrush brush;
             const Vec2 L = solver.grid().size();
             const bool inDomain = domainRect.w > 0 && px >= domainRect.x && px < domainRect.x + domainRect.w &&
-                                  py >= domainRect.y && py < domainRect.y + domainRect.h;
+                py >= domainRect.y && py < domainRect.y + domainRect.h;
             if (inDomain) {
-                const Vec2 pos{(px - domainRect.x) / domainRect.w * L.x, (py - domainRect.y) / domainRect.h * L.y};
+                const Vec2 pos{ (px - domainRect.x) / domainRect.w * L.x, (py - domainRect.y) / domainRect.h * L.y };
                 const bool left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
                 if (left && !io.WantCaptureMouse) {
                     Vec2 vel = prevMouseValid ? (pos - prevMouse) / real(frameDt) : Vec2{};
@@ -198,7 +207,8 @@ int main() {
                 }
                 prevMouse = pos;
                 prevMouseValid = true;
-            } else {
+            }
+            else {
                 prevMouseValid = false;
             }
             solver.setBrush(brush);
@@ -207,18 +217,27 @@ int main() {
             if (running || stepOnce) {
                 solver.step(solver.chosenDt());
                 stepOnce = false;
-                energyPlot.push_back(float(particleEnergy(solver.particles())));
+                // J9 : énergie totale E_c + E_p (E_p = 0 dans les scènes sans gravité).
+                energyPlot.push_back(float(particleEnergy(solver.particles()) + solver.potentialEnergy()));
                 angularPlot.push_back(float(particleAngularMomentum(solver.particles(), solver.domainCenter())));
                 if (energyPlot.size() > plotLength) energyPlot.erase(energyPlot.begin());
                 if (angularPlot.size() > plotLength) angularPlot.erase(angularPlot.begin());
+                // J8 : volume de fluide (aire des cellules fluides) et vitesses parasites.
+                const real h = solver.grid().h();
+                volumePlot.push_back(float(solver.lastStats().fluidCells * h * h));
+                maxSpeedPlot.push_back(float(particleMaxSpeed(solver.particles())));
+                if (volumePlot.size() > plotLength) volumePlot.erase(volumePlot.begin());
+                if (maxSpeedPlot.size() > plotLength) maxSpeedPlot.erase(maxSpeedPlot.begin());
+                noisePlot.push_back(float(solver.noise().relative));   // J9
+                if (noisePlot.size() > plotLength) noisePlot.erase(noisePlot.begin());
             }
 
             // --- Panneau --------------------------------------------------------------
             const float panelW = 380;
             ImGui::SetNextWindowPos(ImVec2(0, 0));
             ImGui::SetNextWindowSize(ImVec2(panelW, io.DisplaySize.y));
-            ImGui::Begin("Particules PIC", nullptr,
-                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+            ImGui::Begin("Particules PIC / FLIP", nullptr,
+                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
             ImGui::PushItemWidth(170);
             FlipParams& p = solver.params();
             ImGui::Text("%.0f img/s   |   %.2f ms par pas", io.Framerate, solver.lastStats().msTotal());
@@ -232,10 +251,21 @@ int main() {
             if (ImGui::Button("Reinit. (R)")) resetAll();
 
             int scene = int(solver.scene());
+            // Même ordre que l'énumération ParticleScene.
             if (ImGui::Combo("Scene", &scene, "Boite pleine - tourbillon\0Boite pleine - repos\0"
-                                              "Disque en rotation (transferts)\0\0")) {
+                "Disque en rotation (transferts)\0"
+                "Cuve au repos (gravite)\0"
+                "Rupture de barrage\0\0")) {   // J9
                 solver.setScene(ParticleScene(scene));
                 resetAll();
+            }
+
+            // J9 : schéma de transfert, appliqué à chaud (pas de réinitialisation).
+            int scheme = int(p.scheme);
+            if (ImGui::Combo("Transfert", &scheme, "PIC\0FLIP / PIC\0\0")) p.scheme = TransferScheme(scheme);
+            if (p.scheme == TransferScheme::FLIP) {
+                sliderReal("alpha (part de FLIP)", p.flipRatio, 0.0f, 1.0f, "%.3f");
+                ImGui::TextDisabled("0 : PIC   0,95 : conseille   1 : FLIP pur");
             }
             if (ImGui::Combo("Grille", &gridChoice, "32 x 32\0" "48 x 48\0" "64 x 64\0" "96 x 96\0" "128 x 128\0\0")) {
                 p.nx = p.ny = gridSizes[gridChoice];
@@ -251,13 +281,36 @@ int main() {
             if (solver.transfersOnly())
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.4f, 1.0f), "Transferts seuls : particules immobiles");
 
+            // J8 : surface libre.
+            if (solver.usesGravity()) {
+                ImGui::SeparatorText("Surface libre");
+                float gy = float(-p.gravity.y);
+                if (ImGui::SliderFloat("gravite (m/s2)", &gy, 0.0f, 20.0f, "%.2f")) p.gravity.y = -real(gy);
+                if (solver.scene() == ParticleScene::TankAtRest) {   // réglages propres à la cuve (J8)
+                    sliderReal("hauteur d'eau (x Ly)", p.tankHeight, 0.05f, 0.95f, "%.3f");
+                    const int cellsHigh = int(std::lround(p.tankHeight * p.ny));
+                    if (ImGui::Button("Aligner la surface sur les cellules")) { p.tankHeight = real(cellsHigh) / p.ny; resetAll(); }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Decaler de h/2")) { p.tankHeight = (cellsHigh + real(0.5)) / p.ny; resetAll(); }
+                    if (ImGui::Checkbox("Marche au fond (obstacle)", &p.tankObstacle)) resetAll();
+                }
+                else {                                             // J9 : rupture de barrage
+                    sliderReal("largeur colonne (x Lx)", p.damWidth, 0.05f, 0.95f, "%.3f");
+                    sliderReal("hauteur colonne (x Ly)", p.damHeight, 0.05f, 0.95f, "%.3f");
+                }
+                ImGui::SliderInt("bulles comblees (cellules)", &p.maxBubbleCells, 0, 16);
+                ImGui::TextDisabled("dimensions : appliquees a la reinit. Bulles a 0 : le volume fond.");
+                ImGui::Text("cellules fluides %d   couches extrapolees %d", solver.lastStats().fluidCells,
+                    solver.lastStats().extrapolationLayers);
+            }
+
             ImGui::SeparatorText("Pas de temps");
             sliderReal("dt (s)", p.dt, 0.001f, 0.2f, "%.4f", ImGuiSliderFlags_Logarithmic);
             ImGui::Checkbox("dt auto : min(dt, CFL cible)", &p.autoDt);
             if (p.autoDt) sliderReal("CFL cible", p.cflTarget, 0.1f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
             sliderReal("CFL des sous-pas", p.substepCfl, 0.25f, 5.0f, "%.2f");
             ImGui::Text("dt %.4f s   CFL %.2f   sous-pas %d", solver.chosenDt(), solver.lastStats().cfl,
-                        solver.lastStats().substeps);
+                solver.lastStats().substeps);
 
             if (ImGui::CollapsingHeader("Souris")) {
                 ImGui::TextDisabled("clic gauche : pousser le fluide");
@@ -285,10 +338,18 @@ int main() {
             for (const Diagnostic& d : solver.diagnostics())
                 ImGui::Text("%-22s %.4g", d.name.c_str(), d.value);
             if (!energyPlot.empty()) {
-                ImGui::PlotLines("##E", energyPlot.data(), int(energyPlot.size()), 0, "energie (particules)",
-                                 0.0f, FLT_MAX, ImVec2(-1, 60));
+                ImGui::PlotLines("##E", energyPlot.data(), int(energyPlot.size()), 0, "energie totale (c + p)",
+                    0.0f, FLT_MAX, ImVec2(-1, 60));                                       // J9
+                ImGui::PlotLines("##B", noisePlot.data(), int(noisePlot.size()), 0, "bruit relatif",
+                    0.0f, FLT_MAX, ImVec2(-1, 60));                                       // J9
                 ImGui::PlotLines("##L", angularPlot.data(), int(angularPlot.size()), 0, "moment cinetique",
-                                 FLT_MAX, FLT_MAX, ImVec2(-1, 60));
+                    FLT_MAX, FLT_MAX, ImVec2(-1, 60));
+            }
+            if (solver.usesGravity() && !volumePlot.empty()) {   // J8
+                ImGui::PlotLines("##V", volumePlot.data(), int(volumePlot.size()), 0, "aire fluide (m2)",
+                    FLT_MAX, FLT_MAX, ImVec2(-1, 60));
+                ImGui::PlotLines("##U", maxSpeedPlot.data(), int(maxSpeedPlot.size()), 0, "max |u_p| (parasite)",
+                    0.0f, FLT_MAX, ImVec2(-1, 60));
             }
             ImGui::PopItemWidth();
             ImGui::End();
@@ -300,7 +361,7 @@ int main() {
 
             const int panelPx = int(panelW * sx);
             const int margin = int(12 * sx);
-            const FieldRenderer::Rect area{panelPx + margin, margin, fbW - panelPx - 2 * margin, fbH - 2 * margin};
+            const FieldRenderer::Rect area{ panelPx + margin, margin, fbW - panelPx - 2 * margin, fbH - 2 * margin };
             domainRect = fitRect(area, L);
 
             // Cadre du domaine, légèrement plus clair que le fond.
@@ -315,13 +376,13 @@ int main() {
                 const float lo = float(view.field->minValue()), hi = float(view.field->maxValue());
                 float vmin = std::min(lo, 0.0f), vmax = std::max(hi, vmin + 1e-12f);
                 if (view.signedField) {
-                    vmax = std::max({std::abs(lo), std::abs(hi), 1e-12f});
+                    vmax = std::max({ std::abs(lo), std::abs(hi), 1e-12f });
                     vmin = -vmax;
                 }
                 fieldRenderer.upload(*view.field);
                 fieldRenderer.draw(domainRect, vmin, vmax,
-                                   view.signedField ? FieldRenderer::Palette::Diverging
-                                                    : FieldRenderer::Palette::Sequential);
+                    view.signedField ? FieldRenderer::Palette::Diverging
+                    : FieldRenderer::Palette::Sequential);
             }
 
             const ParticleSet2D& ps = solver.particles();
@@ -338,7 +399,8 @@ int main() {
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             glfwSwapBuffers(window);
         }
-    } catch (const std::exception& e) {
+    }
+    catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
         exitCode = 1;
     }

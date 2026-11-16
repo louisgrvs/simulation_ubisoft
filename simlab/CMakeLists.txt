@@ -1,13 +1,14 @@
 # ============================================================================
-#  simlab — jour 7
+#  simlab 
 # ============================================================================
 #  Cibles :
 #    simcore            bibliothèque numérique, AUCUNE dépendance OpenGL
 #    simlab_tests       tests doctest (doctest.h est fourni dans tests/)
-#    advection_demo, projection_demo, smoke_demo, pic_transfer_demo
+#    advection_demo, projection_demo, smoke_demo, pic_transfer_demo, free_surface_demo, flip_demo
 #                       démos console -> CSV
 #    simlab             fumée interactive (jour 5)
-#    simlab_particles   particules PIC interactives (jour 7)
+#    simlab_particles   particules PIC interactives (jour 7), cuve à surface libre (jour 8),
+#                       FLIP et rupture de barrage (jour 9)
 #    (les deux applications : option SIMLAB_BUILD_GUI)
 #
 #  GLFW et ImGui sont téléchargés et compilés par CMake (FetchContent) à la
@@ -37,7 +38,12 @@ add_library(simcore
   src/scenes/Seeding.cpp                   # J7
   src/numerics/MacTransfer.cpp             # J7
   src/diagnostics/ParticleDiagnostics.cpp  # J7
-  src/solvers/FlipSolver.cpp)              # J7
+  src/solvers/FlipSolver.cpp               # J7
+  src/geometry/SolidSdf2D.cpp              # J8
+  src/numerics/FreeSurface.cpp             # J8
+  src/numerics/Extrapolation.cpp           # J8
+  src/numerics/ParticleAdvection.cpp       # J8
+  src/diagnostics/FreeSurfaceDiagnostics.cpp)  # J8
 target_include_directories(simcore PUBLIC src)
 if(MSVC)
   target_compile_options(simcore PUBLIC /W4 /utf-8)
@@ -46,7 +52,7 @@ else()
 endif()
 
 # --- Démos console ----------------------------------------------------------------
-foreach(demo advection_demo projection_demo smoke_demo pic_transfer_demo)   # pic_transfer_demo : J7
+foreach(demo advection_demo projection_demo smoke_demo pic_transfer_demo free_surface_demo flip_demo)   # J7, J8, J9
   add_executable(${demo} src/app/${demo}.cpp)
   target_link_libraries(${demo} PRIVATE simcore)
 endforeach()
@@ -59,7 +65,10 @@ add_executable(simlab_tests
   tests/test_advection.cpp
   tests/test_projection.cpp
   tests/test_smoke.cpp                     # J5
-  tests/test_pic.cpp)                      # J7
+  tests/test_pic.cpp                       # J7
+  tests/test_free_surface.cpp              # J8
+  tests/test_flip.cpp                      # J9
+  tests/test_dam_break.cpp)                # J9
 target_include_directories(simlab_tests PRIVATE tests)
 target_link_libraries(simlab_tests PRIVATE simcore)
 add_test(NAME simlab_tests COMMAND simlab_tests)

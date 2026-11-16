@@ -27,3 +27,7 @@ void addBrushSource(Field2D& q, Vec2 center, real radius, real rate, real dt);
 // traceur de température) : f_y = \beta s, vers le haut si _\beta > 0.
 // s est moyennée sur les deux cellules qui encadrent chaque face v intérieure.
 void addBuoyancy(MacGrid2D& g, const Field2D& smoke, real beta, real dt);
+
+// Gravité appliquée à toutes les faces : u += dt·g.x, v += dt·g.y.
+// Les faces dans l'air seront écrasées par l'extrapolation (étape 8), pas besoin de les exclure.
+void addGravity(MacGrid2D& g, Vec2 gravity, real dt);

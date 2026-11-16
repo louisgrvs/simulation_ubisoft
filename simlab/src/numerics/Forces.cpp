@@ -30,3 +30,8 @@ void addBuoyancy(MacGrid2D& g, const Field2D& smoke, real beta, real dt) {
             g.v(i, j) += dt * beta * sFace;
         }
 }
+
+void addGravity(MacGrid2D& g, Vec2 gravity, real dt) {
+    if (gravity.x != 0) for (real& u : g.u.data()) u += dt * gravity.x;
+    if (gravity.y != 0) for (real& v : g.v.data()) v += dt * gravity.y;
+}

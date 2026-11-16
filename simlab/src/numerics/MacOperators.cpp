@@ -1,6 +1,8 @@
 #include "numerics/MacOperators.h"
 #include <algorithm>
 #include <cmath>
+#include "grid/CellLabels.h"
+#include "numerics/FreeSurface.h"
 
 void enforceWallBC(MacGrid2D& g) {
     //Condition de Neumann sur le bord de la grille mac
@@ -71,3 +73,41 @@ void NegLaplacianMAC::operator()(const std::vector<real>& x, std::vector<real>& 
             y[k] = (n * x[k] - sum) * invh2;
         }
 }
+
+void NegLaplacianFS::operator()(const std::vector<real>& x, std::vector<real>& y) const {
+    const real ih2 = 1 / (h * h);
+    const int di[4] = { -1, 1, 0, 0 }, dj[4] = { 0, 0, -1, 1 };
+    y.resize(x.size());
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+            const int k = i + nx * j;
+            if (!L->isFluid(i, j)) { y[k] = x[k]; continue; }
+            real diag = 0, off = 0;
+            for (int n = 0; n < 4; ++n) {
+                const CellType t = (*L)(i + di[n], j + dj[n]);
+                if (t == CellType::Solid) continue;
+                diag += 1;
+                if (t == CellType::Fluid) off += x[k + di[n] + nx * dj[n]];
+            }
+            y[k] = ih2 * (diag * x[k] - off);
+        }
+}
+
+real maxAbsDivergence(const MacGrid2D& g, const CellLabels& L) {
+    real m = 0;
+    for (int j = 0; j < g.ny(); ++j)
+        for (int i = 0; i < g.nx(); ++i)
+            if (L.isFluid(i, j)) m = std::max(m, std::abs(g.divergence(i, j)));
+    return m;
+}
+
+void subtractGradientFS(MacGrid2D& g, const Field2D& q, const CellLabels& L) {
+    const int nx = g.nx(), ny = g.ny();
+    const real ih = 1 / g.h();
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i <= nx; ++i)
+            if (uFaceIsFluid(L, i, j)) g.u(i, j) -= ih * (q(i, j) - q(i - 1, j));
+    for (int j = 0; j <= ny; ++j)
+        for (int i = 0; i < nx; ++i)
+            if (vFaceIsFluid(L, i, j)) g.v(i, j) -= ih * (q(i, j) - q(i, j - 1));
+};

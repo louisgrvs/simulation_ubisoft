@@ -178,6 +178,7 @@ simlab/
 │   ├── grid/             Grid data: Field2D, MacGrid2D, NodalGrid2D
 │   │   ├── Field2D.h                A class of a basic grid on which we are going to interpolate everything, a MACgrid basically consist in 3 field2D grid
 │   │   ├── Field2D.cpp              Methode for this class
+│   │   ├── CellsLabel.h             A class label that we will attribute to each cells to determine its true nature (obstacles, fluid or air)
 │   │   ├── MacGrid2D.h              A class that will consitute our MacGrid class, constructed as 3 field2D.h elements
 │   │   └── MacGrid2D.cpp            Methods for this class
 │   ├── particles/        Particle storage (positions, velocities…): ParticleSet2D
@@ -198,6 +199,8 @@ simlab/
 │   │   ├── MacTransfer.h            P2G and G2P methods, following the Zhu-Bridson methods
 │   │   └── MacTransfer.cpp          Actual function for those methods.
 │   ├── geometry/         Obstacles and collisions
+│   │   ├──SolidSdf2D.h              A class that we will use to separate our solid from everything else, if \phi < 0, then it is inside a solid, if phi >0 inside a fluid and phi =0 is an interface
+│   │   ├──SolidSdf2D.cpp            Methods for this class
 │   ├── materials/        Physics specific to each material and its constitutive laws
 │   ├── solvers/          Time loops producing the simulations: StableFluids, Flip, Mpm (all ISolver2D)
 │   │   ├── ISolver2D.h              A class that will simulate our animation, using time dependency, 
