@@ -68,7 +68,7 @@ Vec2 interpolateMac(const MacGrid2D& grid, Vec2 x);
 void macToParticlesPIC(const MacGrid2D& grid, ParticleSet2D& particles);
 
 // ----------------------------------------------------------------------------
-//  J9 : G2P, schéma FLIP et mélange PIC/FLIP (Zhu & Bridson #4.2.4)
+//  G2P, schéma FLIP et mélange PIC/FLIP (Zhu & Bridson #4.2.4)
 // ----------------------------------------------------------------------------
 //  PIC remplace la vitesse de la particule par celle de la grille :
 //      u_p^PIC  = \sum_f w_f(x_p) u_f^new
