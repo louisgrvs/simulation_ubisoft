@@ -1,7 +1,8 @@
-// Démo sans OpenGL (jour 9) : PIC contre FLIP, énergie et bruit.
+// Démo sans OpenGL (jours 9 et 10) : PIC contre FLIP contre APIC, énergie et bruit.
 //
-// Quatre schémas, avec exactement la même grille, le même pas de temps et la
-// même graine : PIC, puis FLIP mélangé avec alpha = 0,95, 0,99 et 1 (FLIP pur).
+// Cinq schémas, avec exactement la même grille, le même pas de temps et la
+// même graine : PIC, puis FLIP mélangé avec alpha = 0,95, 0,99 et 1 (FLIP pur),
+// puis APIC (J10).
 //
 //   dam.csv      rupture de barrage (surface libre du jour 8, gravité) :
 //                E_c, E_p, E_c + E_p, bruit, position du front, cellules occupées
@@ -39,6 +40,7 @@ const std::vector<Scheme> kSchemes = {
     {"FLIP 0.95", TransferScheme::FLIP, real(0.95)},
     {"FLIP 0.99", TransferScheme::FLIP, real(0.99)},
     {"FLIP 1",    TransferScheme::FLIP, 1},
+    {"APIC",      TransferScheme::APIC, 0},   // J10 : alpha ignoré
 };
 
 int occupiedCells(const FlipSolver& s) {

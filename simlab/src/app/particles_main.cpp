@@ -1,5 +1,5 @@
 // ============================================================================
-//  simlab_particles : particules PIC / FLIP interactives (jours 7 à 9)
+//  simlab_particles : particules PIC / FLIP / APIC interactives (jours 7 à 10)
 // ============================================================================
 //  Même organisation que l'application de fumée (main.cpp, jour 5) :
 //    1. événements (clavier, souris -> pinceau en coordonnées physiques) ;
@@ -13,12 +13,14 @@
 //    Boite pleine - repos      : à remuer avec la souris (clic gauche) ;
 //    Disque en rotation        : transferts SEULS, particules immobiles.
 //                                Avec l'échelle de couleur fixe, on voit la
-//                                vitesse s'éteindre avec PIC, pas avec FLIP pur ;
+//                                vitesse s'éteindre avec PIC, pas avec FLIP pur
+//                                ni avec APIC (appuyer sur R après avoir choisi
+//                                APIC : la rotation exacte est donnée à la réinit.) ;
 //    Cuve au repos (J8)        : surface libre et gravité, doit rester immobile ;
 //    Rupture de barrage (J9)   : colonne d'eau lâchée contre la paroi gauche.
 //
-//  Transfert (J9) : PIC, ou mélange FLIP/PIC réglé par alpha. Le schéma et alpha
-//  s'appliquent à chaud, sans réinitialiser : on peut changer en pleine chute.
+//  Transfert (J9, J10) : PIC, mélange FLIP/PIC réglé par alpha, ou APIC. Le schéma
+//  et alpha s'appliquent à chaud, sans réinitialiser : on peut changer en pleine chute.
 //  Courbes : énergie totale E_c + E_p (ne doit jamais monter) et bruit relatif
 //  (variance des vitesses dans chaque cellule, divisée par <|u|²>).
 //  Clavier : Espace = pause, N ou flèche droite = un pas, R = réinitialiser.
@@ -95,7 +97,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP (jour 9)", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP / APIC (jour 10)", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "Echec de la creation de la fenetre (OpenGL 4.3 indisponible ?)\n");
         glfwTerminate();
@@ -236,7 +238,7 @@ int main() {
             const float panelW = 380;
             ImGui::SetNextWindowPos(ImVec2(0, 0));
             ImGui::SetNextWindowSize(ImVec2(panelW, io.DisplaySize.y));
-            ImGui::Begin("Particules PIC / FLIP", nullptr,
+            ImGui::Begin("Particules PIC / FLIP / APIC", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
             ImGui::PushItemWidth(170);
             FlipParams& p = solver.params();
@@ -260,12 +262,16 @@ int main() {
                 resetAll();
             }
 
-            // J9 : schéma de transfert, appliqué à chaud (pas de réinitialisation).
+            // J9, J10 : schéma de transfert, appliqué à chaud (pas de réinitialisation).
+            // Même ordre que l'énumération TransferScheme.
             int scheme = int(p.scheme);
-            if (ImGui::Combo("Transfert", &scheme, "PIC\0FLIP / PIC\0\0")) p.scheme = TransferScheme(scheme);
+            if (ImGui::Combo("Transfert", &scheme, "PIC\0FLIP / PIC\0APIC\0\0")) p.scheme = TransferScheme(scheme);
             if (p.scheme == TransferScheme::FLIP) {
                 sliderReal("alpha (part de FLIP)", p.flipRatio, 0.0f, 1.0f, "%.3f");
                 ImGui::TextDisabled("0 : PIC   0,95 : conseille   1 : FLIP pur");
+            }
+            else if (p.scheme == TransferScheme::APIC) {   // J10
+                ImGui::TextDisabled("vitesse + gradient local par particule (pas de alpha)");
             }
             if (ImGui::Combo("Grille", &gridChoice, "32 x 32\0" "48 x 48\0" "64 x 64\0" "96 x 96\0" "128 x 128\0\0")) {
                 p.nx = p.ny = gridSizes[gridChoice];

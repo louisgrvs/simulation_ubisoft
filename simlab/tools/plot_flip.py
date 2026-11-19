@@ -1,4 +1,4 @@
-"""Trace les mesures de flip_demo (jour 9) : PIC contre FLIP (alpha = 0,95, 0,99, 1).
+"""Trace les mesures de flip_demo (jours 9 et 10) : PIC contre FLIP (alpha = 0,95, 0,99, 1) contre APIC.
 
 Ligne du haut, rupture de barrage (dam.csv) :
     (E_c + E_p) / E0   énergie mécanique totale : ce qui manque a été dissipé
@@ -40,7 +40,8 @@ def read(path):
 
 
 plt.style.use("dark_background")
-colors = {"PIC": "#7fd1ff", "FLIP 0.95": "#b6f07a", "FLIP 0.99": "#ffb86b", "FLIP 1": "#ff6e9c"}
+colors = {"PIC": "#7fd1ff", "FLIP 0.95": "#b6f07a", "FLIP 0.99": "#ffb86b", "FLIP 1": "#ff6e9c",
+          "APIC": "#e0e0e0"}
 fig, axes = plt.subplots(2, 3, figsize=(16, 9))
 (a1, a2, a3), (a4, a5, a6) = axes
 
@@ -85,7 +86,7 @@ for ax in axes.flat:
     if ax.lines:
         ax.legend(fontsize=9)
 
-fig.suptitle("Jour 9 : PIC contre FLIP (même grille, même pas de temps, même graine)", fontsize=14)
+fig.suptitle("Jours 9 et 10 : PIC, FLIP et APIC (même grille, même pas de temps, même graine)", fontsize=14)
 fig.tight_layout()
 fig.savefig(d / "flip.png", dpi=130)
 print(f"figure : {d / 'flip.png'}")

@@ -90,6 +90,14 @@ void FlipSolver::reset() {
         const real w = params_.diskAngularVelocity;
         auto vel = [=](Vec2 x) { const Vec2 r = x - c; return Vec2{ -w * r.y, w * r.x }; };   // ω × r
         seedParticles(particles_, nx, ny, h, region::disk(c, params_.diskRadius * L.x), opt, vel);
+        // J10 : en APIC, la partie affine exacte de la rotation (C = grad u, lignes cx et cy).
+        // APRÈS l'ensemencement : avant, particles_ est vide et la boucle ne fait rien.
+        // Sinon c reste à 0 (add() le met à 0), pour que PIC et FLIP ne soient pas modifiés.
+        if (params_.scheme == TransferScheme::APIC)
+            for (std::size_t k = 0; k < particles_.size(); ++k) {
+                particles_.cx[k] = { 0, -w };   // (du/dx, du/dy) pour u = -w (y - c_y)
+                particles_.cy[k] = { w, 0 };    // (dv/dx, dv/dy) pour v =  w (x - c_x)
+            }
         break;
     }
 
@@ -132,7 +140,7 @@ real FlipSolver::potentialEnergy() const {
 }
 
 void FlipSolver::step(real dt) {
-    // Boucle de Zhu-Bridson §4.2, avec surface libre.
+    // Boucle de Zhu-Bridson #4.2, avec surface libre.
     if (!(dt > 0)) return;
     stats_ = {};
     stats_.dt = dt;
@@ -145,15 +153,15 @@ void FlipSolver::step(real dt) {
     const int layers = extrapolationLayerCount(vmaxEst, dt, grid_.h());
     stats_.extrapolationLayers = layers;
 
-    // 1. Étiquettes Fluid / Air / Solid (§4.2.2)
+    // 1. Étiquettes Fluid / Air / Solid (#4.2.2)
     auto t0 = Clock::now();
     labelCells(labels_, particles_, grid_.h(), &solids_, params_.maxBubbleCells);
     stats_.fluidCells = labels_.count(CellType::Fluid);
     stats_.msLabels = msSince(t0);
 
-    // 2. P2G (§4.2.2)
+    // 2. P2G (#4.2.2) ; en APIC, avec la partie affine c_p · (x_f - x_p) (J10)
     t0 = Clock::now();
-    particlesToMac(particles_, grid_, masses_);
+    particlesToMac(particles_, grid_, masses_, params_.scheme == TransferScheme::APIC);   // terme affine en APIC
     stats_.energyGrid = gridEnergy(grid_, masses_);
     stats_.emptyFaces = masses_.emptyU + masses_.emptyV;
     stats_.msP2G = msSince(t0);
@@ -172,7 +180,7 @@ void FlipSolver::step(real dt) {
         uOld_ = grid_.u;
         vOld_ = grid_.v;
 
-        // 5. Forces (§4.2.3)
+        // 5. Forces (#4.2.3)
         addGravity(grid_, gravity, dt);
         if (brush_.active)
             addBrushForce(grid_, brush_.pos, params_.brushRadius, params_.brushGain * brush_.velocity, dt);
@@ -198,16 +206,25 @@ void FlipSolver::step(real dt) {
         stats_.msExtrapolation = msSince(t0);
     }
 
-    // 10. G2P (§4.2.4) : PIC, ou mélange FLIP/PIC (J9)
+    // 10. G2P (#4.2.4) : PIC, mélange FLIP/PIC (J9) ou APIC (J10)
     t0 = Clock::now();
-    if (params_.scheme == TransferScheme::FLIP)
-        macToParticlesFLIP(grid_, uOld_, vOld_, particles_, params_.flipRatio);
-    else
-        macToParticlesPIC(grid_, particles_);
+    if (params_.scheme == TransferScheme::APIC) {
+        macToParticlesAPIC(grid_, particles_);                                  // J10
+    }
+    else {
+        if (params_.scheme == TransferScheme::FLIP)
+            macToParticlesFLIP(grid_, uOld_, vOld_, particles_, params_.flipRatio);
+        else
+            macToParticlesPIC(grid_, particles_);
+        // J10 : PIC et FLIP ne calculent pas c. On le remet à 0 pour qu'un retour
+        // à chaud vers APIC (interface) ne reparte pas de gradients périmés.
+        std::fill(particles_.cx.begin(), particles_.cx.end(), Vec2{ 0, 0 });
+        std::fill(particles_.cy.begin(), particles_.cy.end(), Vec2{ 0, 0 });
+    }
     stats_.energyParticlesAfter = particleEnergy(particles_);
     stats_.msG2P = msSince(t0);
 
-    // 11. Déplacement RK2 en sous-pas + repoussement hors des parois (§4.2.5)
+    // 11. Déplacement RK2 en sous-pas + repoussement hors des parois (#4.2.5)
     if (!transfersOnly()) {
         t0 = Clock::now();
         const AdvectionStats adv = advectParticlesRK2(particles_, grid_, dt, params_.substepCfl,

@@ -1,19 +1,20 @@
 #pragma once
 // ============================================================================
 //  Solveur hybride particules / grille MAC (Zhu & Bridson #4.2)
-//  jour 8 : surface libre ; jour 9 : FLIP et rupture de barrage
+//  jour 8 : surface libre ; jour 9 : FLIP et rupture de barrage ; jour 10 : APIC
 // ============================================================================
 //
 //  Un pas :
 //
 //    1. étiquettes Fluid / Air / Solid à partir des particules        (#4.2.2)
-//    2. P2G                                                           (#4.2.2)
+//    2. P2G (en APIC : avec la partie affine c_p · (x_f - x_p), J10)   (#4.2.2)
 //    3. extrapolation n°1 (faces sans poids) + parois
 //    4. uOld_, vOld_ = vitesse avant les forces (pour FLIP)
 //    5. gravité + souris                                              (#4.2.3)
 //    6-7. projection avec p = 0 dans l'air                            (#4.2.3)
 //    8-9. extrapolation n°2 (depuis les faces fluides) + parois
-//   10. G2P : PIC, ou mélange alpha FLIP + (1 - alpha) PIC (J9)        (#4.2.4)
+//   10. G2P : PIC, mélange alpha FLIP + (1 - alpha) PIC (J9),          (#4.2.4)
+//       ou APIC : vitesse comme PIC + gradient c_p (J10)            (Jiang et al. #6)
 //   11. déplacement RK2 en sous-pas CFL + repoussement hors des parois (#4.2.5)
 //
 //  La scène RotatingDisk ne fait QUE les transferts (étapes 2 et 10).
@@ -29,12 +30,12 @@
 #include "solvers/ISolver2D.h"
 #include "diagnostics/ParticleDiagnostics.h"
 
-enum class TransferScheme { PIC, FLIP };   // J9 : FLIP (mélange réglé par flipRatio) ; APIC : jour 10
+enum class TransferScheme { PIC, FLIP, APIC };   // J9 : FLIP (mélange réglé par flipRatio) ; J10 : APIC
 
 enum class ParticleScene {
     BoxVortex,      // boîte pleine, tourbillon cellulaire initial
     BoxAtRest,      // boîte pleine au repos : à remuer avec la souris
-    RotatingDisk,   // disque en rotation rigide, TRANSFERTS SEULS (mesure de PIC)
+    RotatingDisk,   // disque en rotation rigide, TRANSFERTS SEULS (mesure de PIC ; exact en APIC)
     TankAtRest,     // cuve remplie jusqu'à tankHeight, avec gravité
     DamBreak        // J9 : colonne d'eau damWidth × damHeight contre la paroi gauche, lâchée à t = 0
 };
@@ -58,6 +59,7 @@ struct FlipParams {
     real substepCfl = 1;
 
     // J9 : le paramètre alpha pour mélanger FLIP et PIC (le schéma est choisi par `scheme`, plus haut).
+    // Ignoré en APIC (J10), qui ne se mélange pas avec FLIP.
     real flipRatio = real(0.95);   // alpha, part de FLIP (0 : PIC, 1 : FLIP pur)
 
     // Scènes.
@@ -111,9 +113,13 @@ public:
     explicit FlipSolver(const FlipParams& params = {}, ParticleScene scene = ParticleScene::BoxVortex);
 
     // --- ISolver2D -----------------------------------------------------------
-    std::string name() const override {   // J9 : le nom suit le schéma choisi
-        return params_.scheme == TransferScheme::PIC ? "PIC (particules + grille MAC, surface libre)"
-            : "FLIP/PIC (particules + grille MAC, surface libre)";
+    std::string name() const override {
+        switch (params_.scheme) {
+        case TransferScheme::PIC:  return "PIC (particules + grille MAC, surface libre)";
+        case TransferScheme::FLIP: return "FLIP/PIC (particules + grille MAC, surface libre)";
+        case TransferScheme::APIC: return "APIC (particules + grille MAC, surface libre)";
+        }
+        return "";
     }
     void reset() override;
     void step(real dt) override;

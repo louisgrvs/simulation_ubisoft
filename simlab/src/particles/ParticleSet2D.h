@@ -19,6 +19,8 @@ public:
     std::vector<Vec2> x;   // positions (m)
     std::vector<Vec2> v;   // vitesses (m/s)
     std::vector<real> m;   // masses (kg par mètre d'épaisseur en 2D)
+    std::vector<Vec2> cx;  //
+    std::vector<Vec2> cy;
 
     std::size_t size() const { return x.size(); }
     bool empty() const { return x.empty(); }
@@ -27,15 +29,21 @@ public:
         x.clear();
         v.clear();
         m.clear();
+        cx.clear();
+        cy.clear();
     }
     void reserve(std::size_t n) {
         x.reserve(n);
         v.reserve(n);
         m.reserve(n);
+        cx.reserve(n);
+        cy.reserve(n);
     }
-    void add(Vec2 position, Vec2 velocity, real mass) {
+    void add(Vec2 position, Vec2 velocity, real mass, Vec2 grad1 = {0,0}, Vec2 grad2 = {0,0}) {
         x.push_back(position);
         v.push_back(velocity);
         m.push_back(mass);
+        cx.push_back(grad1);
+        cy.push_back(grad2);
     }
 };

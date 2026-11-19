@@ -1,14 +1,16 @@
 #pragma once
 // ============================================================================
-//  Transferts particules <-> grille MAC, schéma PIC (Zhu & Bridson #4.2.2, #4.2.4)
+//  Transferts particules <-> grille MAC : PIC, FLIP (Zhu & Bridson #4.2.2, #4.2.4)
+//  et APIC (Jiang et al. 2015, #5.1, #5.3, #6)
 // ============================================================================
 //
 //  P2G (particules -> grille), composante par composante, chacune sur ses faces :
 //
-//      m_f =  \sum_p w_f(x_p) m_p                       (masse portée par la face f)
-//      u_f = \sum_p w_f(x_p) m_p u_p  /  m_f            (moyenne pondérée)
+//      m_f =  \sum_p w_f(x_p) m_p                                  (masse portée par la face f)
+//      u_f = \sum_p w_f(x_p) m_p ( u_p + c_p · (x_f - x_p) ) / m_f  (moyenne pondérée)
 //
 //  avec w_f(x) = N((x - x_f)/h) N((y - y_f)/h), N le chapeau de LinearKernel (N(r) = max(0,1-r)).
+//  Le terme c_p · (x_f - x_p) n'existe qu'en APIC (affine = true) ; c_p = cx pour u, cy pour v.
 //  Une face sans aucune particule (m_f = 0) est vide : vitesse 0.
 //
 //  G2P (grille -> particules), schéma PIC : la vitesse de la particule est
@@ -20,7 +22,8 @@
 //  G2P sont exactement les transposés de ceux de P2G, ce qui donne :
 //    - conservation de la quantité de mouvement par chaque transfert ;
 //    - E_particules >= E_grille >= E_particules après retour (Cauchy-Schwarz),
-//      c'est-à-dire la dissipation de PIC.
+//      c'est-à-dire la dissipation de PIC (pas en APIC : la partie affine porte
+//      de l'énergie que ½ m |u_p|² ne voit pas).
 //
 //  Aux parois, le pochoir d'une particule peut sortir du champ (par exemple
 //  j0 = -1 pour u dans la demi-cellule du bas). Convention (CONVENTIONS.md) :
@@ -35,12 +38,15 @@
 #include "particles/ParticleSet2D.h"
 
 // Pochoir bilinéaire 2 × 2 d'un point x sur un champ de décalage quelconque.
-// Le noeud (i0 + a, j0 + b), a, b \in {0, 1}, a le poids wx[a] · wy[b].
+// Le noeud (i0 + a, j0 + b), a, b \in {0, 1}, a le poids wx[a] · wy[b]
+// et le gradient (par rapport à x) (dwx[a] · wy[b], wx[a] · dwy[b]).
 // Les indices peuvent sortir du champ : tester avec inField().
 struct Stencil2D {
     int  i0 = 0, j0 = 0;
     real wx[2] = { 0, 0 };
     real wy[2] = { 0, 0 };
+    real dwx[2] = { 0, 0 };   // d wx[a] / dx = -1/h, +1/h
+    real dwy[2] = { 0, 0 };   // d wy[b] / dy = -1/h, +1/h
 };
 
 Stencil2D linearStencil(const Field2D& f, Vec2 x); // Coordonnées indice réelles de x dans ce champ (le décalage n'intervient qu'ici).
@@ -59,7 +65,9 @@ struct MacMasses {
 
 // P2G : écrase grid.u et grid.v (pas grid.p, gardée pour le démarrage à chaud).
 // N'impose PAS u\dot n = 0 : c'est le rôle du solveur (enforceWallBC / projection).
-void particlesToMac(const ParticleSet2D& particles, MacGrid2D& grid, MacMasses& masses);
+// affine = false : PIC et FLIP (cx, cy ignorés) ; affine = true : APIC.
+void particlesToMac(const ParticleSet2D& particles, MacGrid2D& grid, MacMasses& masses,
+    bool affine = false);
 
 // Vitesse de grille interpolée en x, avec les poids de G2P.
 Vec2 interpolateMac(const MacGrid2D& grid, Vec2 x);
@@ -85,3 +93,20 @@ void macToParticlesPIC(const MacGrid2D& grid, ParticleSet2D& particles);
 //  Mêmes poids (linearStencil) que P2G et PIC, même traitement des parois.
 void macToParticlesFLIP(const MacGrid2D& grid, const Field2D& uOld, const Field2D& vOld,
     ParticleSet2D& particles, real flipRatio);
+
+// ----------------------------------------------------------------------------
+//  G2P, schéma APIC sur grille MAC (Jiang et al. 2015, #6)
+// ----------------------------------------------------------------------------
+//  Vitesse comme PIC, plus la partie affine de chaque composante :
+//      u_p  = \sum_f w_f(x_p) u_f          c_x,p = \sum_f \nabla w_f(x_p) u_f   (faces u)
+//      v_p  = \sum_f w_f(x_p) v_f          c_y,p = \sum_f \nabla w_f(x_p) v_f   (faces v)
+//  Avec des poids bilinéaires, \nabla w remplace B_p D_p^{-1} (#5.3) : pas d'inversion.
+//  c_x = (du/dx, du/dy) et c_y = (dv/dx, dv/dy) sont les LIGNES de C = \nabla u.
+//
+//  Pochoir tronqué (bord du domaine, axe tangentiel seulement) : la vitesse est
+//  prolongée par une constante, donc la dérivée selon l'axe tronqué vaut 0 et
+//  l'autre est la différence finie sur la ligne (ou colonne) présente.
+//
+//  Pour un champ affine u = A x + b avec c tiré de A, l'aller-retour
+//  P2G (affine = true) puis G2P APIC est exact : u_p et c reviennent inchangés.
+void macToParticlesAPIC(const MacGrid2D& grid, ParticleSet2D& particles);

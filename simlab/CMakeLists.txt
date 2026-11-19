@@ -8,7 +8,7 @@
 #                       démos console -> CSV
 #    simlab             fumée interactive (jour 5)
 #    simlab_particles   particules PIC interactives (jour 7), cuve à surface libre (jour 8),
-#                       FLIP et rupture de barrage (jour 9)
+#                       FLIP et rupture de barrage (jour 9), APIC (jour 10)
 #    (les deux applications : option SIMLAB_BUILD_GUI)
 #
 #  GLFW et ImGui sont téléchargés et compilés par CMake (FetchContent) à la
@@ -36,7 +36,7 @@ add_library(simcore
   src/diagnostics/FluidDiagnostics.cpp     # J5
   src/solvers/StableFluidsSolver.cpp       # J5
   src/scenes/Seeding.cpp                   # J7
-  src/numerics/MacTransfer.cpp             # J7
+  src/numerics/MacTransfer.cpp             # J7 (APIC : J10)
   src/diagnostics/ParticleDiagnostics.cpp  # J7
   src/solvers/FlipSolver.cpp               # J7
   src/geometry/SolidSdf2D.cpp              # J8
@@ -68,7 +68,8 @@ add_executable(simlab_tests
   tests/test_pic.cpp                       # J7
   tests/test_free_surface.cpp              # J8
   tests/test_flip.cpp                      # J9
-  tests/test_dam_break.cpp)                # J9
+  tests/test_dam_break.cpp                 # J9
+  tests/test_apic.cpp)                     # J10
 target_include_directories(simlab_tests PRIVATE tests)
 target_link_libraries(simlab_tests PRIVATE simcore)
 add_test(NAME simlab_tests COMMAND simlab_tests)

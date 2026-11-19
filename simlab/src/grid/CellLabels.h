@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>   // std::count
 #include <cstdint>
 #include <vector>
 #include "grid/Field2D.h"
