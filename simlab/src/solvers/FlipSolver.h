@@ -2,6 +2,7 @@
 // ============================================================================
 //  Solveur hybride particules / grille MAC (Zhu & Bridson #4.2)
 //  jour 8 : surface libre ; jour 9 : FLIP et rupture de barrage ; jour 10 : APIC
+//  jour 11 : disque en rotation libre (pas complet), diagnostics de forme
 // ============================================================================
 //
 //  Un pas :
@@ -18,6 +19,8 @@
 //   11. déplacement RK2 en sous-pas CFL + repoussement hors des parois (#4.2.5)
 //
 //  La scène RotatingDisk ne fait QUE les transferts (étapes 2 et 10).
+//  RotatingDiskFree (J11) part du même état mais fait le pas complet, sans gravité :
+//  le disque tourne librement, avec une surface libre tout autour.
 //  La gravité n'agit que dans TankAtRest et DamBreak (les scènes du J7 restent inchangées).
 // ============================================================================
 #include <string>
@@ -37,7 +40,8 @@ enum class ParticleScene {
     BoxAtRest,      // boîte pleine au repos : à remuer avec la souris
     RotatingDisk,   // disque en rotation rigide, TRANSFERTS SEULS (mesure de PIC ; exact en APIC)
     TankAtRest,     // cuve remplie jusqu'à tankHeight, avec gravité
-    DamBreak        // J9 : colonne d'eau damWidth × damHeight contre la paroi gauche, lâchée à t = 0
+    DamBreak,       // J9 : colonne d'eau damWidth × damHeight contre la paroi gauche, lâchée à t = 0
+    RotatingDiskFree // J11 : même disque, pas complet sans gravité (les particules bougent)
 };
 
 struct FlipParams {
@@ -101,6 +105,7 @@ struct FlipStepStats {
     real energyParticlesBefore = 0;  // avant P2G
     real energyGrid = 0;             // juste après P2G (avant forces et projection)
     real energyParticlesAfter = 0;   // après G2P
+    real angularMomentumGrid = 0;    // J11 : L de la grille juste après P2G, autour du centre de masse
     double msLabels = 0, msP2G = 0, msForces = 0, msProjection = 0,
         msExtrapolation = 0, msG2P = 0, msAdvection = 0;
     double msTotal() const {
@@ -134,14 +139,19 @@ public:
     ParticleScene scene() const { return scene_; }
     void setScene(ParticleScene s) { scene_ = s; reset(); }
     void setBrush(const FlipBrush& b) { brush_ = b; }
-    bool transfersOnly() const { return scene_ == ParticleScene::RotatingDisk; }
-    bool usesGravity()   const { return scene_ == ParticleScene::TankAtRest || scene_ == ParticleScene::DamBreak; }
-    Vec2 activeGravity() const { return usesGravity() ? params_.gravity : Vec2{ 0, 0 }; }   // J9
-    real potentialEnergy() const;                                                         // J9 : E_p des particules
-    const NoiseStats& noise() const { return noiseStats_; }                               // J9 : bruit
+    bool transfersOnly() const { return scene_ == ParticleScene::RotatingDisk; } //Nous dis si pas complet ou pas
+    bool usesGravity()   const { return scene_ == ParticleScene::TankAtRest || scene_ == ParticleScene::DamBreak; } //Nous dis si gravité ou pas
+    // J11 : de l'air autour du fluide (p = 0 sur sa surface). Les boîtes pleines n'en ont pas,
+    // et le disque en transferts seuls ne fait pas de projection.
+    bool hasFreeSurface() const { return usesGravity() || scene_ == ParticleScene::RotatingDiskFree; }
+    Vec2 activeGravity() const { return usesGravity() ? params_.gravity : Vec2{ 0, 0 }; }
+    real potentialEnergy() const;                                                         //E_p des particules
+    const NoiseStats& noise() const { return noiseStats_; }                               //bruit
 
     real chosenDt() const;
     Vec2 domainCenter() const { return 0.5 * grid_.size(); }
+    Vec2 centerOfMass() const { return particleCenterOfMass(particles_); }                // J11
+    real initialRadiusOfGyration() const { return gyration0_; }                           // J11 : R_g à t = 0
 
     const ParticleSet2D& particles() const { return particles_; }
     ParticleSet2D& particles() { return particles_; }   // pour les tests
@@ -153,7 +163,7 @@ public:
     long                 stepCount() const { return steps_; }
 
 private:
-    void updateDerivedFields();        // J8 : advectParticles a disparu (→ ParticleAdvection)
+    void updateDerivedFields();
 
     FlipParams params_;
     ParticleScene scene_;
@@ -161,14 +171,15 @@ private:
     MacMasses masses_;
     Field2D uOld_, vOld_;                    // vitesse de grille avant les forces (pour FLIP, jour 9)
     ParticleSet2D particles_;
-    CellLabels labels_;                      // J8
-    SolidSdf2D solids_{ Vec2{ 1, 1 } };          // J8 : redimensionné dans reset()
+    CellLabels labels_;
+    SolidSdf2D solids_{ Vec2{ 1, 1 } };          //redimensionné dans reset()
     Field2D speed_, vorticity_, divergence_, count_;
-    Field2D labelsField_;                    // J8 : étiquettes converties pour l'affichage
-    Field2D noise_;                          // J9 : variance des vitesses dans chaque cellule
-    NoiseStats noiseStats_;                  // J9 : sa moyenne pondérée par la masse
+    Field2D labelsField_;                    // étiquettes converties pour l'affichage
+    Field2D noise_;                          // variance des vitesses dans chaque cellule
+    NoiseStats noiseStats_;                  // sa moyenne pondérée par la masse
     FlipBrush brush_;
     FlipStepStats stats_;
     real time_ = 0;
     long steps_ = 0;
+    real gyration0_ = 0;                     // J11 : rayon de giration à la réinitialisation
 };

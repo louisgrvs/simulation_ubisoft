@@ -84,13 +84,13 @@ void FlipSolver::reset() {
     case ParticleScene::BoxAtRest:   // boîte pleine au repos, qu'on remue avec la souris
         seedParticles(particles_, nx, ny, h, region::everywhere(), opt);
         break;
-
+    case ParticleScene::RotatingDiskFree:
     case ParticleScene::RotatingDisk: {
         const Vec2 c = domainCenter();
         const real w = params_.diskAngularVelocity;
         auto vel = [=](Vec2 x) { const Vec2 r = x - c; return Vec2{ -w * r.y, w * r.x }; };   // ω × r
         seedParticles(particles_, nx, ny, h, region::disk(c, params_.diskRadius * L.x), opt, vel);
-        // J10 : en APIC, la partie affine exacte de la rotation (C = grad u, lignes cx et cy).
+        // en APIC, la partie affine exacte de la rotation (C = grad u, lignes cx et cy).
         // APRÈS l'ensemencement : avant, particles_ est vide et la boucle ne fait rien.
         // Sinon c reste à 0 (add() le met à 0), pour que PIC et FLIP ne soient pas modifiés.
         if (params_.scheme == TransferScheme::APIC)
@@ -109,7 +109,7 @@ void FlipSolver::reset() {
         seedParticles(particles_, nx, ny, h, [=](Vec2 x) { return water(x) && sdf.phi(x) > 0; }, opt);
         break;
     }
-    case ParticleScene::DamBreak:    // J9 : colonne d'eau au repos contre la paroi gauche
+    case ParticleScene::DamBreak:    // colonne d'eau au repos contre la paroi gauche
     {
         const Region dam = region::box(Vec2{ 0, 0 }, Vec2{ params_.damWidth * L.x, params_.damHeight * L.y });
         const SolidSdf2D sdf = solids_;
@@ -121,6 +121,7 @@ void FlipSolver::reset() {
     stats_ = {};
     time_ = 0;
     steps_ = 0;
+    gyration0_ = particleRadiusOfGyration(particles_, centerOfMass());   // J11
     updateDerivedFields();
 }
 
@@ -134,7 +135,7 @@ real FlipSolver::chosenDt() const {
     return params_.autoDt ? std::min(params_.dt, stableDt()) : params_.dt;
 }
 
-// J9 : énergie potentielle des particules, référence au fond (nulle sans gravité).
+// énergie potentielle des particules, référence au fond (nulle sans gravité).
 real FlipSolver::potentialEnergy() const {
     return particlePotentialEnergy(particles_, activeGravity());
 }
@@ -147,7 +148,7 @@ void FlipSolver::step(real dt) {
     stats_.cfl = particleMaxSpeed(particles_) * dt / grid_.h();
     stats_.energyParticlesBefore = particleEnergy(particles_);
 
-    const Vec2 gravity = activeGravity();   // J9 : nulle hors des scènes à gravité
+    const Vec2 gravity = activeGravity();   // nulle hors des scènes à gravité
     // Vitesse maximale attendue pendant le pas (les particules + ce qu'ajoute la gravité).
     const real vmaxEst = particleMaxSpeed(particles_) + norm(gravity) * dt;
     const int layers = extrapolationLayerCount(vmaxEst, dt, grid_.h());
@@ -163,9 +164,13 @@ void FlipSolver::step(real dt) {
     t0 = Clock::now();
     particlesToMac(particles_, grid_, masses_, params_.scheme == TransferScheme::APIC);   // terme affine en APIC
     stats_.energyGrid = gridEnergy(grid_, masses_);
+    // J11 : la mesure honnête de L, la même pour les trois schémas. En APIC, une partie
+    // du moment cinétique est portée par cx, cy : la somme des x_p × m_p v_p ne la voit pas,
+    // la grille si (P2G l'y a déposée).
+    stats_.angularMomentumGrid = gridAngularMomentum(grid_, masses_, centerOfMass());
     stats_.emptyFaces = masses_.emptyU + masses_.emptyV;
     stats_.msP2G = msSince(t0);
-    uOld_ = grid_.u;   // J9 : en transferts seuls, la grille ne change pas (Delta u = 0)
+    uOld_ = grid_.u;   // en transferts seuls, la grille ne change pas (Delta u = 0)
     vOld_ = grid_.v;
 
     if (!transfersOnly()) {
@@ -176,7 +181,7 @@ void FlipSolver::step(real dt) {
         extrapolateVelocity(grid_, uValid, vValid, layers);
         enforceSolidBC(grid_, labels_);   // P2G et l'extrapolation ont pu écrire sur les parois
 
-        // 4. Vitesse avant les forces, pour FLIP (J9) : APRÈS l'extrapolation, AVANT la gravité.
+        // 4. Vitesse avant les forces, pour FLIP : après l'extrapolation, avant la gravité.
         uOld_ = grid_.u;
         vOld_ = grid_.v;
 
@@ -206,17 +211,17 @@ void FlipSolver::step(real dt) {
         stats_.msExtrapolation = msSince(t0);
     }
 
-    // 10. G2P (#4.2.4) : PIC, mélange FLIP/PIC (J9) ou APIC (J10)
+    // 10.G2P (#4.2.4) : PIC, mélange FLIP/PIC ou APIC 
     t0 = Clock::now();
     if (params_.scheme == TransferScheme::APIC) {
-        macToParticlesAPIC(grid_, particles_);                                  // J10
+        macToParticlesAPIC(grid_, particles_);
     }
     else {
         if (params_.scheme == TransferScheme::FLIP)
             macToParticlesFLIP(grid_, uOld_, vOld_, particles_, params_.flipRatio);
         else
             macToParticlesPIC(grid_, particles_);
-        // J10 : PIC et FLIP ne calculent pas c. On le remet à 0 pour qu'un retour
+        // PIC et FLIP ne calculent pas c. On le remet à 0 pour qu'un retour
         // à chaud vers APIC (interface) ne reparte pas de gradients périmés.
         std::fill(particles_.cx.begin(), particles_.cx.end(), Vec2{ 0, 0 });
         std::fill(particles_.cy.begin(), particles_.cy.end(), Vec2{ 0, 0 });
@@ -243,14 +248,16 @@ void FlipSolver::updateDerivedFields() {
     computeVorticity(grid_, vorticity_);
     computeDivergence(grid_, divergence_);
     countParticlesPerCell(particles_, count_);
-    labels_.toField(labelsField_);   // J8 : 0 = air, 1 = fluide, 2 = solide
-    noiseStats_ = cellVelocityVariance(particles_, noise_);   // J9
+    labels_.toField(labelsField_);   // 0 = air, 1 = fluide, 2 = solide
+    noiseStats_ = cellVelocityVariance(particles_, noise_);
 }
 
 std::vector<Diagnostic> FlipSolver::diagnostics() const {
     const Vec2 P = particleMomentum(particles_);
+    const Vec2 G = centerOfMass();                                                  // J11
+    const real Rg = particleRadiusOfGyration(particles_, G);                        // J11
     const real h = grid_.h();
-    const real Ec = particleEnergy(particles_), Ep = potentialEnergy();   // J9
+    const real Ec = particleEnergy(particles_), Ep = potentialEnergy();
     return {
         { "temps (s)",              time_ },
         { "pas",                    double(steps_) },
@@ -266,7 +273,12 @@ std::vector<Diagnostic> FlipSolver::diagnostics() const {
         { "E grille (apres P2G)",   stats_.energyGrid },
         { "E apres G2P/avant P2G", stats_.energyParticlesBefore > 0
                                        ? stats_.energyParticlesAfter / stats_.energyParticlesBefore : 1.0 },
-        { "L particules",           particleAngularMomentum(particles_, domainCenter()) },
+        { "L particules (/ x_G)",   particleAngularMomentum(particles_, G) },     // J11 : autour du centre de masse
+        { "L grille (apres P2G)",   stats_.angularMomentumGrid },                   // J11
+        { "centre de masse x",      G.x },                                          // J11
+        { "centre de masse y",      G.y },                                          // J11
+        { "rayon de giration R_g",  Rg },                                           // J11 : R/sqrt(2) pour un disque
+        { "R_g / R_g(0)",           gyration0_ > 0 ? Rg / gyration0_ : 1.0 },       // J11
         { "|P| particules",         norm(P) },
         { "max|u| particules",      particleMaxSpeed(particles_) },                 // J8 : vitesses parasites
         { "cellules fluides",       double(stats_.fluidCells) },                    // J8

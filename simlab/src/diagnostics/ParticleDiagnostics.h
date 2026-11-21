@@ -50,3 +50,15 @@ struct NoiseStats {
     int  cells = 0;          // cellules prises en compte
 };
 NoiseStats cellVelocityVariance(const ParticleSet2D& p, Field2D& variance, int minCount = 2);
+
+// ----------------------------------------------------------------------------
+//  J11 : forme d'un fluide libre (disque en rotation, simulation complète)
+// ----------------------------------------------------------------------------
+// Centre de masse :      x_G = \sum_p m_p x_p / \sum_p m_p
+// Rayon de giration :    R_g = sqrt( \sum_p m_p |x_p - c|^2 / \sum_p m_p )
+// Pour un disque plein uniforme de rayon R, R_g = R / sqrt(2) (≈ 0,212 pour R = 0,3).
+// R_g qui grandit : le disque s'étale ; qui diminue : les particules s'agglutinent.
+// Le moment cinétique d'un fluide libre se mesure autour de x_G : autour d'un
+// point fixe, une dérive du disque ajouterait un terme x_G × P qui n'est pas de la rotation.
+Vec2 particleCenterOfMass(const ParticleSet2D& p);   // (0, 0) si aucune particule
+real particleRadiusOfGyration(const ParticleSet2D& p, Vec2 center);

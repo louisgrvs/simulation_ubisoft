@@ -1,0 +1,13 @@
+experience,schema,L/L0,Lg/Lg0,E/E0,Rg/Rg0,bruit_relatif,ms_par_pas
+disque_transferts_100,PIC,0.854194,,0.734614,,,0.766
+disque_transferts_100,FLIP 0.95,0.991529,,0.983344,,,0.893
+disque_transferts_100,FLIP 1,1,,1,,,0.9119
+disque_transferts_100,APIC,1,,1,,,0.9654
+disque_libre_quart_de_tour,PIC,0.906755,0.90849,0.823056,1.00259,0.000697563,4.90436
+disque_libre_fin,PIC,0.257367,0.254563,0.0182776,2.24825,0.000716444,4.74866
+disque_libre_quart_de_tour,FLIP 0.95,0.973375,0.973866,0.942384,1.01361,0.000838423,4.9973
+disque_libre_fin,FLIP 0.95,0.420861,0.411952,0.0676661,2.14861,0.00330291,5.69368
+disque_libre_quart_de_tour,FLIP 1,0.976689,0.976851,0.949532,1.01611,0.000906332,4.93999
+disque_libre_fin,FLIP 1,0.449938,0.440766,0.0876772,2.14395,0.0232025,6.38761
+disque_libre_quart_de_tour,APIC,0.974556,0.97487,0.943713,1.0161,0.000807702,4.92398
+disque_libre_fin,APIC,0.514439,0.500063,0.0998666,2.16147,0.00306893,5.98505

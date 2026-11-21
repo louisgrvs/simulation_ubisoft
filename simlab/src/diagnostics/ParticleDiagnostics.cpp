@@ -127,3 +127,25 @@ NoiseStats cellVelocityVariance(const ParticleSet2D& p, Field2D& variance, int m
     st.relative = meanSq > 0 ? st.meanVariance / meanSq : 0;
     return st;
 }
+
+// J11 ----------------------------------------------------------------------------
+
+Vec2 particleCenterOfMass(const ParticleSet2D& p) {
+    Vec2 s;
+    real m = 0;
+    for (std::size_t k = 0; k < p.size(); ++k) {
+        s += p.m[k] * p.x[k];
+        m += p.m[k];
+    }
+    return m > 0 ? s / m : Vec2{};
+}
+
+real particleRadiusOfGyration(const ParticleSet2D& p, Vec2 c) {
+    real s = 0, m = 0;
+    for (std::size_t k = 0; k < p.size(); ++k) {
+        const Vec2 r = p.x[k] - c;
+        s += p.m[k] * dot(r, r);
+        m += p.m[k];
+    }
+    return m > 0 ? std::sqrt(s / m) : real(0);
+}

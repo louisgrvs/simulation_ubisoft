@@ -4,6 +4,7 @@
 //   2. transferts seuls : champ affine, rotation rigide, quantité de mouvement,
 //      pochoir tronqué aux bords, régressions PIC ;
 //   3. solveur complet : disque en rotation, repos, tourbillon, rupture de barrage.
+//   4. jour 11 : disque en rotation libre (pas complet) et diagnostics de forme.
 #include "doctest.h"
 #include <algorithm>
 #include <cmath>
@@ -351,4 +352,126 @@ TEST_CASE("Solveur APIC, rupture de barrage : l'eau avance, l'énergie ne croît
     CHECK(fApic > 0.5);
     CHECK(eApic <= 1.01);
     CHECK(ePic < eApic);
+}
+
+// ---------------------------------------------------------------------------
+//  4. Jour 11 : disque en rotation libre (pas complet, sans gravité)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("J11 : disque libre et disque figé partent du même état, seul le comportement change") {
+    for (TransferScheme sc : {TransferScheme::PIC, TransferScheme::APIC}) {
+        FlipParams prm;
+        prm.nx = prm.ny = 32;
+        prm.scheme = sc;
+        FlipSolver fige(prm, ParticleScene::RotatingDisk);
+        FlipSolver libre(prm, ParticleScene::RotatingDiskFree);
+        // Le case partagé de reset() : mêmes particules, mêmes vitesses, même partie affine.
+        REQUIRE(libre.particles().size() == fige.particles().size());
+        CHECK(maxDiff(libre.particles().x, fige.particles().x) == 0.0);
+        CHECK(maxDiff(libre.particles().v, fige.particles().v) == 0.0);
+        CHECK(maxDiff(libre.particles().cx, fige.particles().cx) == 0.0);
+        CHECK(maxDiff(libre.particles().cy, fige.particles().cy) == 0.0);
+        // Le comportement : transferts seuls d'un côté, pas complet avec surface libre de l'autre.
+        CHECK(fige.transfersOnly());
+        CHECK(!fige.hasFreeSurface());
+        CHECK(!libre.transfersOnly());
+        CHECK(libre.hasFreeSurface());
+        CHECK(!libre.usesGravity());
+    }
+}
+
+TEST_CASE("J11 : après un pas, le disque libre a bougé, le disque figé non") {
+    FlipParams prm;
+    prm.nx = prm.ny = 32;
+    FlipSolver fige(prm, ParticleScene::RotatingDisk);
+    FlipSolver libre(prm, ParticleScene::RotatingDiskFree);
+    const std::vector<Vec2> x0 = libre.particles().x;
+    fige.step(prm.dt);
+    libre.step(prm.dt);
+    CHECK(maxDiff(fige.particles().x, x0) == 0.0);
+    // Le bord tourne à omega R = 0,6 m/s : en dt = 1/60 s, il parcourt 0,01, soit un tiers de cellule.
+    CHECK(maxDiff(libre.particles().x, x0) > 0.005);
+    CHECK(libre.lastStats().pressureIterations > 0);   // la projection a bien tourné
+}
+
+TEST_CASE("J11, diagnostics : centre de masse, R_g, L0 et E0 d'un disque uniforme proches des valeurs exactes") {
+    FlipParams prm;
+    prm.nx = prm.ny = 32;
+    FlipSolver s(prm, ParticleScene::RotatingDiskFree);
+    const real R = prm.diskRadius, w = prm.diskAngularVelocity, rho = prm.density;
+    const Vec2 G = s.centerOfMass();
+    // Semis stratifié aléatoire : le centre bouge un peu, bien moins qu'une cellule.
+    CHECK(norm(G - s.domainCenter()) < 0.05 * s.grid().h());
+    // Disque plein : R_g = R / sqrt(2) ; L = rho omega pi R^4 / 2 ; E = rho omega^2 pi R^4 / 4.
+    // L'écart (quelques 1e-3) vient du bord en escalier du semis.
+    CHECK(s.initialRadiusOfGyration() == doctest::Approx(R / std::sqrt(real(2))).epsilon(0.01));
+    CHECK(particleAngularMomentum(s.particles(), G) == doctest::Approx(rho * w * kPi * std::pow(R, 4) / 2).epsilon(0.01));
+    CHECK(particleEnergy(s.particles()) == doctest::Approx(rho * w * w * kPi * std::pow(R, 4) / 4).epsilon(0.01));
+    CHECK(norm(particleMomentum(s.particles())) < 1e-3 * particleMass(s.particles()) * w * R);
+}
+
+TEST_CASE("J11, L de la grille après P2G : égal à celui des particules en PIC, plus grand en APIC (part affine)") {
+    FlipParams prm;
+    prm.nx = prm.ny = 32;
+    // PIC : P2G conserve exactement L (pochoirs complets, disque loin des parois).
+    prm.scheme = TransferScheme::PIC;
+    FlipSolver pic(prm, ParticleScene::RotatingDisk);
+    const real Lpic = particleAngularMomentum(pic.particles(), pic.centerOfMass());
+    pic.step(0.01);
+    CHECK(pic.lastStats().angularMomentumGrid == doctest::Approx(Lpic).epsilon(1e-10));
+    // APIC : la grille reçoit aussi la rotation portée par cx, cy, que la somme
+    // des x_p × m_p v_p ne voit pas. Elle est donc strictement plus grande ici.
+    prm.scheme = TransferScheme::APIC;
+    FlipSolver apic(prm, ParticleScene::RotatingDisk);
+    const real Lapic = particleAngularMomentum(apic.particles(), apic.centerOfMass());
+    apic.step(0.01);
+    const real ratio = apic.lastStats().angularMomentumGrid / Lapic;
+    MESSAGE("APIC, disque fige : L grille / L particules = " << ratio);
+    CHECK(ratio > 1 + 1e-3);
+    CHECK(ratio < 1.05);
+}
+
+TEST_CASE("J11, disque libre sur un quart de tour : la forme tient, APIC garde L bien mieux que PIC") {
+    // Un disque de fluide libre en rotation est instable (Rayleigh-Taylor : la force
+    // centrifuge pousse le fluide vers l'air, sans tension de surface pour le retenir).
+    // On ne le teste donc que sur un quart de tour, avant que les doigts ne se forment.
+    struct Result { real L, E, Emax, Rg, drift; };
+    auto run = [](TransferScheme sc, real alpha) {
+        FlipParams prm;
+        prm.nx = prm.ny = 32;
+        prm.scheme = sc;
+        prm.flipRatio = alpha;
+        prm.dt = real(1) / 60;
+        FlipSolver s(prm, ParticleScene::RotatingDiskFree);
+        const Vec2 G0 = s.centerOfMass();
+        const real E0 = particleEnergy(s.particles());
+        s.step(prm.dt);
+        const real Lg0 = s.lastStats().angularMomentumGrid;   // L de la grille au premier P2G
+        const int steps = int(std::lround(kPi / (2 * prm.diskAngularVelocity) / prm.dt));   // quart de tour
+        Result r{0, 0, 0, 0, 0};
+        for (int k = 1; k < steps; ++k) {
+            s.step(prm.dt);
+            r.Emax = std::max(r.Emax, particleEnergy(s.particles()) / E0);
+        }
+        CHECK(allFiniteParticles(s.particles()));
+        r.L = s.lastStats().angularMomentumGrid / Lg0;
+        r.E = particleEnergy(s.particles()) / E0;
+        r.Rg = particleRadiusOfGyration(s.particles(), s.centerOfMass()) / s.initialRadiusOfGyration();
+        r.drift = norm(s.centerOfMass() - G0) / s.grid().h();
+        return r;
+    };
+    const Result pic = run(TransferScheme::PIC, 0);
+    const Result flip = run(TransferScheme::FLIP, 1);
+    const Result apic = run(TransferScheme::APIC, 0);
+    MESSAGE("quart de tour, L/L0 : PIC " << pic.L << ", FLIP " << flip.L << ", APIC " << apic.L
+            << " ; E/E0 : PIC " << pic.E << ", FLIP " << flip.E << ", APIC " << apic.E
+            << " ; R_g/R_g0 APIC " << apic.Rg);
+    for (const Result& r : {pic, flip, apic}) {
+        CHECK(r.Emax <= 1 + 1e-3);              // pas de création d'énergie
+        CHECK(std::abs(r.Rg - 1) < 0.03);       // encore un disque
+        CHECK(r.drift < 0.5);                   // pas de dérive (P = 0)
+    }
+    CHECK(apic.L > 0.95);                       // mesuré : environ 0,97
+    CHECK(apic.L > pic.L + 0.1);                // mesuré : PIC environ 0,73 en 32 x 32
+    CHECK(flip.L > pic.L + 0.1);
 }

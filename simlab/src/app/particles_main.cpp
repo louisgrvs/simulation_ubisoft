@@ -1,5 +1,5 @@
 // ============================================================================
-//  simlab_particles : particules PIC / FLIP / APIC interactives (jours 7 à 10)
+//  simlab_particles : particules PIC / FLIP / APIC interactives (jours 7 à 11)
 // ============================================================================
 //  Même organisation que l'application de fumée (main.cpp, jour 5) :
 //    1. événements (clavier, souris -> pinceau en coordonnées physiques) ;
@@ -18,11 +18,17 @@
 //                                APIC : la rotation exacte est donnée à la réinit.) ;
 //    Cuve au repos (J8)        : surface libre et gravité, doit rester immobile ;
 //    Rupture de barrage (J9)   : colonne d'eau lâchée contre la paroi gauche.
-//
+//    Disque en rotation (total) (J11) : même semis que le disque en rotation, mais pas
+//                                complet sans gravité. Les particules bougent, la projection
+//                                agit (p < 0 à l'intérieur : c'est la force centripète).
+//                                Sans tension de surface, ce disque est instable
+//                                (Rayleigh-Taylor) : il tient environ un quart de tour,
+//                                puis des doigts partent vers les parois.
 //  Transfert (J9, J10) : PIC, mélange FLIP/PIC réglé par alpha, ou APIC. Le schéma
 //  et alpha s'appliquent à chaud, sans réinitialiser : on peut changer en pleine chute.
 //  Courbes : énergie totale E_c + E_p (ne doit jamais monter) et bruit relatif
-//  (variance des vitesses dans chaque cellule, divisée par <|u|²>).
+//  (variance des vitesses dans chaque cellule, divisée par <|u|²>) ; moment cinétique
+//  autour du centre de masse (J11) ; R_g / R_g(0) pour le disque total (J11).
 //  Clavier : Espace = pause, N ou flèche droite = un pas, R = réinitialiser.
 // ============================================================================
 #include <glad/glad.h>   // toujours AVANT GLFW
@@ -97,7 +103,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP / APIC (jour 10)", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP / APIC (jour 11)", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "Echec de la creation de la fenetre (OpenGL 4.3 indisponible ?)\n");
         glfwTerminate();
@@ -145,6 +151,7 @@ int main() {
         std::vector<float> energyPlot, angularPlot, speeds;
         std::vector<float> volumePlot, maxSpeedPlot;   // J8 : cuve au repos
         std::vector<float> noisePlot;                  // J9 : bruit relatif
+        std::vector<float> gyrationPlot;               // J11 : R_g / R_g(0)
         const size_t plotLength = 600;
 
         FieldRenderer::Rect domainRect;
@@ -160,6 +167,7 @@ int main() {
             volumePlot.clear();
             maxSpeedPlot.clear();
             noisePlot.clear();   // J9
+            gyrationPlot.clear();   // J11
             const real vmax = particleMaxSpeed(solver.particles());
             speedScale = vmax > 0 ? float(vmax) : 1.0f;
             };
@@ -221,7 +229,8 @@ int main() {
                 stepOnce = false;
                 // J9 : énergie totale E_c + E_p (E_p = 0 dans les scènes sans gravité).
                 energyPlot.push_back(float(particleEnergy(solver.particles()) + solver.potentialEnergy()));
-                angularPlot.push_back(float(particleAngularMomentum(solver.particles(), solver.domainCenter())));
+                // J11 : autour du centre de masse (le disque total peut dériver).
+                angularPlot.push_back(float(particleAngularMomentum(solver.particles(), solver.centerOfMass())));
                 if (energyPlot.size() > plotLength) energyPlot.erase(energyPlot.begin());
                 if (angularPlot.size() > plotLength) angularPlot.erase(angularPlot.begin());
                 // J8 : volume de fluide (aire des cellules fluides) et vitesses parasites.
@@ -232,6 +241,11 @@ int main() {
                 if (maxSpeedPlot.size() > plotLength) maxSpeedPlot.erase(maxSpeedPlot.begin());
                 noisePlot.push_back(float(solver.noise().relative));   // J9
                 if (noisePlot.size() > plotLength) noisePlot.erase(noisePlot.begin());
+                // J11 : forme du fluide (1 tant que le disque reste un disque).
+                const real rg0 = solver.initialRadiusOfGyration();
+                gyrationPlot.push_back(rg0 > 0 ? float(particleRadiusOfGyration(solver.particles(),
+                    solver.centerOfMass()) / rg0) : 1.0f);
+                if (gyrationPlot.size() > plotLength) gyrationPlot.erase(gyrationPlot.begin());
             }
 
             // --- Panneau --------------------------------------------------------------
@@ -257,7 +271,8 @@ int main() {
             if (ImGui::Combo("Scene", &scene, "Boite pleine - tourbillon\0Boite pleine - repos\0"
                 "Disque en rotation (transferts)\0"
                 "Cuve au repos (gravite)\0"
-                "Rupture de barrage\0\0")) {   // J9
+                "Rupture de barrage\0"
+                "Disque en rotation (total)\0\0")) {   // J11
                 solver.setScene(ParticleScene(scene));
                 resetAll();
             }
@@ -287,12 +302,18 @@ int main() {
             if (solver.transfersOnly())
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.4f, 1.0f), "Transferts seuls : particules immobiles");
 
-            // J8 : surface libre.
-            if (solver.usesGravity()) {
+            // J8 : surface libre. J11 : aussi pour le disque total, qui n'a pas de gravité.
+            if (solver.hasFreeSurface()) {
                 ImGui::SeparatorText("Surface libre");
-                float gy = float(-p.gravity.y);
-                if (ImGui::SliderFloat("gravite (m/s2)", &gy, 0.0f, 20.0f, "%.2f")) p.gravity.y = -real(gy);
-                if (solver.scene() == ParticleScene::TankAtRest) {   // réglages propres à la cuve (J8)
+                if (solver.usesGravity()) {
+                    float gy = float(-p.gravity.y);
+                    if (ImGui::SliderFloat("gravite (m/s2)", &gy, 0.0f, 20.0f, "%.2f")) p.gravity.y = -real(gy);
+                }
+                if (solver.scene() == ParticleScene::RotatingDiskFree) {   // J11
+                    ImGui::TextDisabled("pas de gravite : p < 0 dans le disque (force centripete)");
+                    ImGui::TextDisabled("instable sans tension de surface : ~1/4 de tour");
+                }
+                else if (solver.scene() == ParticleScene::TankAtRest) {   // réglages propres à la cuve (J8)
                     sliderReal("hauteur d'eau (x Ly)", p.tankHeight, 0.05f, 0.95f, "%.3f");
                     const int cellsHigh = int(std::lround(p.tankHeight * p.ny));
                     if (ImGui::Button("Aligner la surface sur les cellules")) { p.tankHeight = real(cellsHigh) / p.ny; resetAll(); }
@@ -351,12 +372,15 @@ int main() {
                 ImGui::PlotLines("##L", angularPlot.data(), int(angularPlot.size()), 0, "moment cinetique",
                     FLT_MAX, FLT_MAX, ImVec2(-1, 60));
             }
-            if (solver.usesGravity() && !volumePlot.empty()) {   // J8
+            if (solver.hasFreeSurface() && !volumePlot.empty())   // J8, J11 : aussi pour le disque total
                 ImGui::PlotLines("##V", volumePlot.data(), int(volumePlot.size()), 0, "aire fluide (m2)",
                     FLT_MAX, FLT_MAX, ImVec2(-1, 60));
+            if (solver.usesGravity() && !maxSpeedPlot.empty())    // J8 : n'a de sens que pour un fluide au repos
                 ImGui::PlotLines("##U", maxSpeedPlot.data(), int(maxSpeedPlot.size()), 0, "max |u_p| (parasite)",
                     0.0f, FLT_MAX, ImVec2(-1, 60));
-            }
+            if (solver.scene() == ParticleScene::RotatingDiskFree && !gyrationPlot.empty())   // J11
+                ImGui::PlotLines("##G", gyrationPlot.data(), int(gyrationPlot.size()), 0, "R_g / R_g(0)",
+                    FLT_MAX, FLT_MAX, ImVec2(-1, 60));
             ImGui::PopItemWidth();
             ImGui::End();
 

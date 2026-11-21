@@ -4,11 +4,11 @@
 #  Cibles :
 #    simcore            bibliothèque numérique, AUCUNE dépendance OpenGL
 #    simlab_tests       tests doctest (doctest.h est fourni dans tests/)
-#    advection_demo, projection_demo, smoke_demo, pic_transfer_demo, free_surface_demo, flip_demo
-#                       démos console -> CSV
+#    advection_demo, projection_demo, smoke_demo, pic_transfer_demo, free_surface_demo, flip_demo,
+#    apic_demo          démos console -> CSV (apic_demo : jour 11)
 #    simlab             fumée interactive (jour 5)
 #    simlab_particles   particules PIC interactives (jour 7), cuve à surface libre (jour 8),
-#                       FLIP et rupture de barrage (jour 9), APIC (jour 10)
+#                       FLIP et rupture de barrage (jour 9), APIC (jour 10), disque libre (jour 11)
 #    (les deux applications : option SIMLAB_BUILD_GUI)
 #
 #  GLFW et ImGui sont téléchargés et compilés par CMake (FetchContent) à la
@@ -52,7 +52,7 @@ else()
 endif()
 
 # --- Démos console ----------------------------------------------------------------
-foreach(demo advection_demo projection_demo smoke_demo pic_transfer_demo free_surface_demo flip_demo)   # J7, J8, J9
+foreach(demo advection_demo projection_demo smoke_demo pic_transfer_demo free_surface_demo flip_demo apic_demo)   # J7, J8, J9, J11
   add_executable(${demo} src/app/${demo}.cpp)
   target_link_libraries(${demo} PRIVATE simcore)
 endforeach()
