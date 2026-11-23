@@ -5,7 +5,7 @@
 namespace {
 
     // Vitesse interpolée en x à partir des faces u et v.
-    // → Reprends EXACTEMENT ce qu'utilise le advectParticles du jour 7 (par ex. Field2D::sample).
+    // -> Reprends EXACTEMENT ce qu'utilise le advectParticles du jour 7 (par ex. Field2D::sample).
     Vec2 velocityAt(const MacGrid2D& g, Vec2 x) {
         return { g.u.sample(x), g.v.sample(x) };
     }

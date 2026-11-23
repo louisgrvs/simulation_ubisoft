@@ -13,6 +13,7 @@
 #include "numerics/MacOperators.h"
 #include "numerics/ParticleAdvection.h"
 #include "numerics/Projection.h"
+#include "numerics/SandFriction.h"
 #include "scenes/Seeding.h"
 
 namespace {
@@ -38,6 +39,12 @@ void FlipSolver::reset() {
     params_.flipRatio = std::clamp(params_.flipRatio, real(0), real(1));   // J9
     params_.damWidth = std::clamp(params_.damWidth, real(0), real(1));   // J9
     params_.damHeight = std::clamp(params_.damHeight, real(0), real(1));   // J9
+    // J13 : \phi dans [0°, 90°], \mu >= 0, colonne dans le domaine.
+    params_.frictionAngleDeg = std::clamp(params_.frictionAngleDeg, real(0), real(90));
+    params_.wallFriction = std::max(params_.wallFriction, real(0));      // pas de borne haute
+    params_.columnWidth = std::clamp(params_.columnWidth, real(0), real(1));    // fractions de Lx et Ly
+    params_.columnHeight = std::clamp(params_.columnHeight, real(0), real(1));
+
     const int nx = params_.nx, ny = params_.ny;
     grid_ = MacGrid2D(nx, ny, real(1) / nx);
     masses_ = MacMasses{ grid_.u, grid_.v };
@@ -91,7 +98,7 @@ void FlipSolver::reset() {
         auto vel = [=](Vec2 x) { const Vec2 r = x - c; return Vec2{ -w * r.y, w * r.x }; };   // ω × r
         seedParticles(particles_, nx, ny, h, region::disk(c, params_.diskRadius * L.x), opt, vel);
         // en APIC, la partie affine exacte de la rotation (C = grad u, lignes cx et cy).
-        // APRÈS l'ensemencement : avant, particles_ est vide et la boucle ne fait rien.
+        // après l'ensemencement : avant, particles_ est vide et la boucle ne fait rien.
         // Sinon c reste à 0 (add() le met à 0), pour que PIC et FLIP ne soient pas modifiés.
         if (params_.scheme == TransferScheme::APIC)
             for (std::size_t k = 0; k < particles_.size(); ++k) {
@@ -114,6 +121,22 @@ void FlipSolver::reset() {
         const Region dam = region::box(Vec2{ 0, 0 }, Vec2{ params_.damWidth * L.x, params_.damHeight * L.y });
         const SolidSdf2D sdf = solids_;
         seedParticles(particles_, nx, ny, h, [=](Vec2 x) { return dam(x) && sdf.phi(x) > 0; }, opt);
+        break;
+    }
+    case ParticleScene::ColumnCollapse:   // J13 : colonne au repos, posée au centre du sol
+    {
+        //  - région : region::box(lo, hi) avec lo = (Lx/2 − largeur/2, 0), hi = (Lx/2 + largeur/2, hauteur),
+        //    largeur = columnWidth·Lx, hauteur = columnHeight·Ly
+        //  - même ensemencement que DamBreak (avec le test sdf.phi(x) > 0, au cas où)
+        //  - vitesse initiale nulle
+        //  Même scène pour l'eau et le sable : seul params_.material change.
+        const real w = params_.columnWidth * L.x;     // largeur en mètres (fraction × Lx)
+        const real H = params_.columnHeight * L.y;    // hauteur en mètres
+        const Vec2 lo{ real(0.5) * L.x - real(0.5) * w, 0 };
+        const Vec2 hi{ real(0.5) * L.x + real(0.5) * w, H };
+        const Region col = region::box(lo, hi);
+        const SolidSdf2D sdf = solids_;
+        seedParticles(particles_, nx, ny, h, [=](Vec2 x) { return col(x) && sdf.phi(x) > 0; }, opt);
         break;
     }
     }   // fin du switch (scene_)
@@ -191,6 +214,15 @@ void FlipSolver::step(real dt) {
             addBrushForce(grid_, brush_.pos, params_.brushRadius, params_.brushGain * brush_.velocity, dt);
         stats_.msForces = msSince(t0);
 
+        // 5b. [Sable] frottement aux parois (éq. 4) : lit u·n AVANT que project() l'annule.  // J13
+        if (isSand()) {
+            t0 = Clock::now();
+            // \mu : coefficient de frottement sable-paroi (éq. 4), 0,6 dans la fig. 2 de l'article.
+            const WallFrictionStats st = applyWallFriction(grid_, labels_, params_.wallFriction);
+            stats_.frictionFaces = st.frictionFaces;
+            stats_.msFriction += msSince(t0);
+        }
+
         // 6-7. Projection avec p = 0 dans l'air (enforceSolidBC est appelé au début de project).
         t0 = Clock::now();
         ProjectionOptions opt;
@@ -201,6 +233,31 @@ void FlipSolver::step(real dt) {
         stats_.divBefore = ps.divBefore;
         stats_.divAfter = ps.divAfter;
         stats_.msProjection = msSince(t0);
+
+        // 7b. [Sable] contrainte de frottement (éq. 2), avec grid_.p de la projection.  // J13
+        if (isSand()) {
+            t0 = Clock::now();
+            FrictionalStressOptions fo;   // pas "opt" : ce nom est déjà pris par la projection
+            fo.density = params_.density;
+            fo.frictionAngleDeg = params_.frictionAngleDeg;
+            fo.rigidStress = params_.rigidStress;
+            fo.rigidGroups = params_.rigidGroups;
+            const FrictionalStressStats stressStat = applyFrictionalStress(grid_, labels_, dt, fo);
+            stats_.stressCells = stressStat.stressCells;
+            stats_.rigidCells = stressStat.rigidCells;
+            stats_.rigidGroups = stressStat.rigidGroups;
+            stats_.energyBeforeFriction = stressStat.energyBefore;
+            stats_.energyAfterFriction = stressStat.energyAfter;
+            // 7c. Deuxième projection : la contrainte et les groupes rigides ne sont pas à
+            //     divergence nulle. Sans elle, le sable perd du volume à chaque pas (les
+            //     particules se tassent : jusqu'à −65 % en 2 s pour φ = 45°).
+            if (params_.reprojectAfterFriction) {
+                const ProjectionStats ps2 = project(grid_, labels_, dt, opt);
+                stats_.pressureIterations += ps2.iterations;
+                stats_.divAfter = ps2.divAfter;
+            }
+            stats_.msFriction += msSince(t0);
+        }
 
         // 8-9. Extrapolation n°2 depuis les faces fluides, puis parois à nouveau.
         t0 = Clock::now();
@@ -291,6 +348,12 @@ std::vector<Diagnostic> FlipSolver::diagnostics() const {
         { "faces vides",            double(stats_.emptyFaces) },
         { "max|div| apres proj.",   stats_.divAfter },
         { "iter. CG pression",      double(stats_.pressureIterations) },
+        { "faces freinees (eq. 4)", double(stats_.frictionFaces) },                // J13
+        { "cellules sigma_f",       double(stats_.stressCells) },                  // J13
+        { "cellules rigides",       double(stats_.rigidCells) },                   // J13
+        { "groupes rigides",        double(stats_.rigidGroups) },                  // J13
+        { "E apres/avant eq. 2",    stats_.energyBeforeFriction > 0                // J13 : doit rester <= 1
+                                       ? stats_.energyAfterFriction / stats_.energyBeforeFriction : 1.0 },
         { "ms par pas",             stats_.msTotal() },
     };
 }

@@ -3,6 +3,7 @@
 //  Solveur hybride particules / grille MAC (Zhu & Bridson #4.2)
 //  jour 8 : surface libre ; jour 9 : FLIP et rupture de barrage ; jour 10 : APIC
 //  jour 11 : disque en rotation libre (pas complet), diagnostics de forme
+//  jour 13 : sable (Zhu & Bridson §3) : frottement aux parois, contrainte de frottement
 // ============================================================================
 //
 //  Un pas :
@@ -12,7 +13,10 @@
 //    3. extrapolation n°1 (faces sans poids) + parois
 //    4. uOld_, vOld_ = vitesse avant les forces (pour FLIP)
 //    5. gravité + souris                                              (#4.2.3)
+//    5b. [Sable, J13] frottement aux parois (éq. 4), AVANT que la projection annule u·n
 //    6-7. projection avec p = 0 dans l'air                            (#4.2.3)
+//    7b. [Sable, J13] contrainte de frottement (éq. 2, 3) et groupes rigides (étape 5)
+//    7c. [Sable, J13] deuxième projection : le frottement n'est pas à divergence nulle
 //    8-9. extrapolation n°2 (depuis les faces fluides) + parois
 //   10. G2P : PIC, mélange alpha FLIP + (1 - alpha) PIC (J9),          (#4.2.4)
 //       ou APIC : vitesse comme PIC + gradient c_p (J10)            (Jiang et al. #6)
@@ -21,7 +25,7 @@
 //  La scène RotatingDisk ne fait QUE les transferts (étapes 2 et 10).
 //  RotatingDiskFree (J11) part du même état mais fait le pas complet, sans gravité :
 //  le disque tourne librement, avec une surface libre tout autour.
-//  La gravité n'agit que dans TankAtRest et DamBreak (les scènes du J7 restent inchangées).
+//  La gravité n'agit que dans TankAtRest, DamBreak et ColumnCollapse (J13) ; les scènes du J7 restent inchangées.
 // ============================================================================
 #include <string>
 #include <vector>
@@ -32,8 +36,12 @@
 #include "particles/ParticleSet2D.h"
 #include "solvers/ISolver2D.h"
 #include "diagnostics/ParticleDiagnostics.h"
+#include "numerics/SandFriction.h"     // J13
 
 enum class TransferScheme { PIC, FLIP, APIC };   // J9 : FLIP (mélange réglé par flipRatio) ; J10 : APIC
+
+// J13 : Water = le solveur des jours 8 à 11, inchangé ; Sand = étapes 5b et 7b en plus.
+enum class Material { Water, Sand };
 
 enum class ParticleScene {
     BoxVortex,      // boîte pleine, tourbillon cellulaire initial
@@ -41,7 +49,8 @@ enum class ParticleScene {
     RotatingDisk,   // disque en rotation rigide, TRANSFERTS SEULS (mesure de PIC ; exact en APIC)
     TankAtRest,     // cuve remplie jusqu'à tankHeight, avec gravité
     DamBreak,       // J9 : colonne d'eau damWidth × damHeight contre la paroi gauche, lâchée à t = 0
-    RotatingDiskFree // J11 : même disque, pas complet sans gravité (les particules bougent)
+    RotatingDiskFree, // J11 : même disque, pas complet sans gravité (les particules bougent)
+    ColumnCollapse    // J13 : colonne columnWidth × columnHeight posée au CENTRE du sol, lâchée à t = 0
 };
 
 struct FlipParams {
@@ -75,6 +84,16 @@ struct FlipParams {
     real damWidth = real(0.25);       // J9 : largeur de la colonne d'eau, en fraction de Lx
     real damHeight = real(0.5);        // J9 : hauteur de la colonne, en fraction de Ly (rapport 2, Martin & Moyce)
 
+    // Sable (Zhu & Bridson §3).                                              // J13
+    Material material = Material::Water;
+    real frictionAngleDeg = 30;        // φ (degrés), éq. 1 et 2
+    real wallFriction = real(0.6);     // μ sable-paroi, éq. 4 (fig. 2 de l'article)
+    bool rigidStress = true;           // éq. 3 : σ_rigid dans les cellules sous le seuil (SandFriction.h)
+    bool rigidGroups = true;           // étape 5 : groupes rigides projetés sur un mouvement rigide
+    bool reprojectAfterFriction = true;  // 2e projection après le frottement (volume conservé)
+    real columnWidth = real(0.2);      // largeur de la colonne, en fraction de Lx
+    real columnHeight = real(0.4);     // hauteur de la colonne, en fraction de Ly (rapport 2)
+
     // Surface libre.                                                       // J8
     Vec2 gravity = { 0, real(-9.81) };
     real pushMargin = real(1e-3);      // distance minimale aux parois, en fraction de h (celle du J7)
@@ -106,10 +125,17 @@ struct FlipStepStats {
     real energyGrid = 0;             // juste après P2G (avant forces et projection)
     real energyParticlesAfter = 0;   // après G2P
     real angularMomentumGrid = 0;    // J11 : L de la grille juste après P2G, autour du centre de masse
+    int  frictionFaces = 0;          // J13 : faces freinées par l'éq. 4
+    int  stressCells = 0;            // J13 : cellules où σ_f ≠ 0
+    int  rigidCells = 0;             // J13 : parmi elles, celles sous le seuil (σ_rigid, éq. 3)
+    int  rigidGroups = 0;            // J13 : groupes rigides (étape 5)
+    real energyBeforeFriction = 0;   // J13 : énergie de la grille avant / après l'éq. 2
+    real energyAfterFriction = 0;
     double msLabels = 0, msP2G = 0, msForces = 0, msProjection = 0,
-        msExtrapolation = 0, msG2P = 0, msAdvection = 0;
+        msExtrapolation = 0, msG2P = 0, msAdvection = 0, msFriction = 0;   // msFriction : J13
     double msTotal() const {
-        return msLabels + msP2G + msForces + msProjection + msExtrapolation + msG2P + msAdvection;
+        return msLabels + msP2G + msForces + msProjection + msExtrapolation + msG2P + msAdvection
+            + msFriction;
     }
 };
 
@@ -140,7 +166,11 @@ public:
     void setScene(ParticleScene s) { scene_ = s; reset(); }
     void setBrush(const FlipBrush& b) { brush_ = b; }
     bool transfersOnly() const { return scene_ == ParticleScene::RotatingDisk; } //Nous dis si pas complet ou pas
-    bool usesGravity()   const { return scene_ == ParticleScene::TankAtRest || scene_ == ParticleScene::DamBreak; } //Nous dis si gravité ou pas
+    bool usesGravity()   const {
+        return scene_ == ParticleScene::TankAtRest || scene_ == ParticleScene::DamBreak
+            || scene_ == ParticleScene::ColumnCollapse;
+    } //Nous dis si gravité ou pas (J13 : + colonne)
+    bool isSand() const { return params_.material == Material::Sand; }                        // J13
     // J11 : de l'air autour du fluide (p = 0 sur sa surface). Les boîtes pleines n'en ont pas,
     // et le disque en transferts seuls ne fait pas de projection.
     bool hasFreeSurface() const { return usesGravity() || scene_ == ParticleScene::RotatingDiskFree; }

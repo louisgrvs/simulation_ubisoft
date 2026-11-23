@@ -5,7 +5,7 @@
 #    simcore            bibliothèque numérique, AUCUNE dépendance OpenGL
 #    simlab_tests       tests doctest (doctest.h est fourni dans tests/)
 #    advection_demo, projection_demo, smoke_demo, pic_transfer_demo, free_surface_demo, flip_demo,
-#    apic_demo          démos console -> CSV (apic_demo : jour 11)
+#    apic_demo, sand_demo  démos console -> CSV (apic_demo : jour 11, sand_demo : jour 13)
 #    simlab             fumée interactive (jour 5)
 #    simlab_particles   particules PIC interactives (jour 7), cuve à surface libre (jour 8),
 #                       FLIP et rupture de barrage (jour 9), APIC (jour 10), disque libre (jour 11)
@@ -43,7 +43,9 @@ add_library(simcore
   src/numerics/FreeSurface.cpp             # J8
   src/numerics/Extrapolation.cpp           # J8
   src/numerics/ParticleAdvection.cpp       # J8
-  src/diagnostics/FreeSurfaceDiagnostics.cpp)  # J8
+  src/diagnostics/FreeSurfaceDiagnostics.cpp  # J8
+  src/numerics/SandFriction.cpp            # J13
+  src/diagnostics/SandDiagnostics.cpp)     # J13
 target_include_directories(simcore PUBLIC src)
 if(MSVC)
   target_compile_options(simcore PUBLIC /W4 /utf-8)
@@ -52,7 +54,8 @@ else()
 endif()
 
 # --- Démos console ----------------------------------------------------------------
-foreach(demo advection_demo projection_demo smoke_demo pic_transfer_demo free_surface_demo flip_demo apic_demo)   # J7, J8, J9, J11
+foreach(demo advection_demo projection_demo smoke_demo pic_transfer_demo free_surface_demo flip_demo apic_demo
+             sand_demo)   # J7, J8, J9, J11, J13
   add_executable(${demo} src/app/${demo}.cpp)
   target_link_libraries(${demo} PRIVATE simcore)
 endforeach()
@@ -69,7 +72,8 @@ add_executable(simlab_tests
   tests/test_free_surface.cpp              # J8
   tests/test_flip.cpp                      # J9
   tests/test_dam_break.cpp                 # J9
-  tests/test_apic.cpp)                     # J10
+  tests/test_apic.cpp                      # J10
+  tests/test_sand.cpp)                     # J13
 target_include_directories(simlab_tests PRIVATE tests)
 target_link_libraries(simlab_tests PRIVATE simcore)
 add_test(NAME simlab_tests COMMAND simlab_tests)

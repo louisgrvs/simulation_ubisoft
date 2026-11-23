@@ -1,5 +1,5 @@
 // ============================================================================
-//  simlab_particles : particules PIC / FLIP / APIC interactives (jours 7 à 11)
+//  simlab_particles : particules PIC / FLIP / APIC interactives (jours 7 à 11), sable (jour 13)
 // ============================================================================
 //  Même organisation que l'application de fumée (main.cpp, jour 5) :
 //    1. événements (clavier, souris -> pinceau en coordonnées physiques) ;
@@ -24,6 +24,9 @@
 //                                Sans tension de surface, ce disque est instable
 //                                (Rayleigh-Taylor) : il tient environ un quart de tour,
 //                                puis des doigts partent vers les parois.
+//    Effondrement d'une colonne (J13) : colonne centrée sur le sol, en eau ou en sable
+//                                (choix « Materiau », à chaud). L'eau touche les murs ; le sable
+//                                forme un tas (groupes rigides), d'autant plus pointu que phi est grand.
 //  Transfert (J9, J10) : PIC, mélange FLIP/PIC réglé par alpha, ou APIC. Le schéma
 //  et alpha s'appliquent à chaud, sans réinitialiser : on peut changer en pleine chute.
 //  Courbes : énergie totale E_c + E_p (ne doit jamais monter) et bruit relatif
@@ -103,7 +106,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP / APIC (jour 11)", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "simlab - particules PIC / FLIP / APIC, sable (jour 13)", nullptr, nullptr);
     if (!window) {
         std::fprintf(stderr, "Echec de la creation de la fenetre (OpenGL 4.3 indisponible ?)\n");
         glfwTerminate();
@@ -272,7 +275,8 @@ int main() {
                 "Disque en rotation (transferts)\0"
                 "Cuve au repos (gravite)\0"
                 "Rupture de barrage\0"
-                "Disque en rotation (total)\0\0")) {   // J11
+                "Disque en rotation (total)\0"   // J11
+                "Effondrement d'une colonne\0\0")) {   // J13
                 solver.setScene(ParticleScene(scene));
                 resetAll();
             }
@@ -287,6 +291,29 @@ int main() {
             }
             else if (p.scheme == TransferScheme::APIC) {   // J10
                 ImGui::TextDisabled("vitesse + gradient local par particule (pas de alpha)");
+            }
+            // J13 : matériau, appliqué à chaud (même ordre que l'énumération Material).
+            int material = int(p.material);
+            if (ImGui::Combo("Materiau", &material, "Eau\0Sable\0\0")) {
+                p.material = Material(material);
+                // Zhu-Bridson utilisent PIC pour le sable : le bruit de FLIP le fait « couler ».
+                if (p.material == Material::Sand) p.scheme = TransferScheme::PIC;
+            }
+            if (solver.isSand()) {
+                ImGui::SeparatorText("Sable (Zhu-Bridson, #3)");
+                sliderReal("angle de frottement phi (deg)", p.frictionAngleDeg, 5.0f, 60.0f, "%.1f");
+                sliderReal("frottement paroi mu", p.wallFriction, 0.0f, 1.5f, "%.2f");
+                ImGui::Checkbox("contrainte rigide (eq. 3)", &p.rigidStress);
+                if (!p.rigidStress)
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "sans eq. 3 : sigma_f depasse, l'energie peut monter");
+                else {
+                    ImGui::Checkbox("groupes rigides (etape 5)", &p.rigidGroups);
+                    if (!p.rigidGroups) ImGui::TextDisabled("sans groupes : le sable flue et s'aplatit");
+                }
+                ImGui::Checkbox("2e projection (volume)", &p.reprojectAfterFriction);
+                if (!p.reprojectAfterFriction) ImGui::TextDisabled("sans elle : le sable se tasse et perd du volume");
+                ImGui::Text("cellules sigma_f %d   rigides %d   groupes %d", solver.lastStats().stressCells,
+                    solver.lastStats().rigidCells, solver.lastStats().rigidGroups);
             }
             if (ImGui::Combo("Grille", &gridChoice, "32 x 32\0" "48 x 48\0" "64 x 64\0" "96 x 96\0" "128 x 128\0\0")) {
                 p.nx = p.ny = gridSizes[gridChoice];
@@ -320,6 +347,10 @@ int main() {
                     ImGui::SameLine();
                     if (ImGui::Button("Decaler de h/2")) { p.tankHeight = (cellsHigh + real(0.5)) / p.ny; resetAll(); }
                     if (ImGui::Checkbox("Marche au fond (obstacle)", &p.tankObstacle)) resetAll();
+                }
+                else if (solver.scene() == ParticleScene::ColumnCollapse) {   // J13 : colonne centrée
+                    sliderReal("largeur colonne (x Lx)", p.columnWidth, 0.05f, 0.95f, "%.3f");
+                    sliderReal("hauteur colonne (x Ly)", p.columnHeight, 0.05f, 0.95f, "%.3f");
                 }
                 else {                                             // J9 : rupture de barrage
                     sliderReal("largeur colonne (x Lx)", p.damWidth, 0.05f, 0.95f, "%.3f");
